@@ -1,0 +1,61 @@
+@page "/"
+@inject WorkspaceState Workspace
+
+<PageTitle>الرئيسية · CSV to Project XML</PageTitle>
+
+<div class="page-heading">
+    <div>
+        <div class="eyebrow">لوحة التحكم</div>
+        <h1>أهلاً بك في محوّل المشروعات</h1>
+        <p>حوّل ملفات الإدارات إلى حزم XML مع الحفاظ على توافق الإصدار الأول.</p>
+    </div>
+    <div class="hero-chip"><span class="hero-chip-dot"></span> يعمل محلياً على جهازك</div>
+</div>
+
+<div class="hero-card">
+    <div class="hero-copy">
+        <div class="hero-kicker">VERSION 2 · BULK READY</div>
+        <h2>من ملفات CSV إلى حزمة مشروع جاهزة للاستيراد</h2>
+        <p>تحويل مشروع واحد أو معالجة مجلد كامل، مع إدارة سجل الإدارات ومراجعة تقارير كل عملية.</p>
+        <div class="hero-actions">
+            <a class="btn btn-primary" href="/convert">ابدأ التحويل <span>←</span></a>
+            <a class="btn btn-ghost" href="/departments">إدارة الإدارات</a>
+        </div>
+    </div>
+    <div class="hero-graphic" aria-hidden="true">
+        <div class="file-card csv-file"><span class="file-ext">CSV</span><span class="file-line"></span><span class="file-line short"></span><span class="file-line"></span></div>
+        <div class="transform-arrow">⇄</div>
+        <div class="file-card xml-file"><span class="file-ext">XML</span><span class="file-line"></span><span class="file-line short"></span><span class="file-line"></span></div>
+        <div class="graphic-orbit orbit-one"></div><div class="graphic-orbit orbit-two"></div>
+    </div>
+</div>
+
+<div class="section-heading"><div><h2>مساحة العمل</h2><p>الإعدادات المستخدمة في عمليات التحويل الحالية</p></div></div>
+<div class="dashboard-grid">
+    <div class="info-card">
+        <div class="info-card-icon teal">▦</div>
+        <div class="info-label">ملف سجل الإدارات</div>
+        <div class="info-value path-value">@(string.IsNullOrWhiteSpace(Workspace.NamesFilePath) ? "لم يتم تحديده بعد" : Path.GetFileName(Workspace.NamesFilePath))</div>
+        <div class="info-sub">names.json · مصدر أسماء الإدارات والـ slugs</div>
+        <a href="/departments" class="text-link">فتح إدارة الإدارات ←</a>
+    </div>
+    <div class="info-card">
+        <div class="info-card-icon amber">⇄</div>
+        <div class="info-label">مجلد النتائج</div>
+        <div class="info-value path-value">@(string.IsNullOrWhiteSpace(Workspace.OutputFolderPath) ? "لم يتم تحديده بعد" : Workspace.OutputFolderPath)</div>
+        <div class="info-sub">المكان الذي ستُنشأ بداخله مجلدات المشروعات</div>
+        <a href="/convert" class="text-link">إعداد عملية تحويل ←</a>
+    </div>
+    <div class="info-card">
+        <div class="info-card-icon violet">✓</div>
+        <div class="info-label">التوافق</div>
+        <div class="info-value">V1 compatibility mode</div>
+        <div class="info-sub">السلوك القديم هو الافتراضي، والخصائص الجديدة اختيارية.</div>
+        <a href="/settings" class="text-link">مراجعة إعدادات التصدير ←</a>
+    </div>
+</div>
+
+<div class="notice-card">
+    <div class="notice-icon">i</div>
+    <div><strong>ملاحظة قبل أول تشغيل</strong><p>حدد ملف <span class="mono">names.json</span> من صفحة إدارة الإدارات. يمكنك بعدها اختيار ملفي CSV لمشروع واحد أو اختيار مجلد كامل للمعالجة الجماعية.</p></div>
+</div>

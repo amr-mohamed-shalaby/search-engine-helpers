@@ -1,0 +1,159 @@
+@page "/departments"
+@inject IPathPicker Picker
+@inject WorkspaceState Workspace
+@inject NamesRegistryService Registry
+@inject IJSRuntime JS
+
+<PageTitle>إدارة الإدارات · CSV to Project XML</PageTitle>
+
+<div class="page-heading">
+    <div><div class="eyebrow">NAMES REGISTRY</div><h1>إدارة الإدارات</h1><p>إضافة الإدارات أو تعديلها أو حذفها. قيمة الـ slug المخزنة هي المرجع الأساسي لأسماء ملفات CSV.</p></div>
+    <div class="count-chip"><strong>@CustomDepartments.Count</strong><span>إدارة في السجل</span></div>
+</div>
+
+<div class="panel registry-source">
+    <div class="registry-source-icon">JSON</div>
+    <div class="registry-source-info"><strong>ملف names.json</strong><span class="mono">@(string.IsNullOrWhiteSpace(NamesPath) ? "لم يتم تحديد الملف" : NamesPath)</span></div>
+    <button class="btn btn-outline" @onclick="PickNames">اختيار ملف</button>
+    <button class="btn btn-ghost" @onclick="Load" disabled="@string.IsNullOrWhiteSpace(NamesPath)">إعادة تحميل</button>
+</div>
+
+<div class="registry-layout">
+    <section class="panel registry-list-panel">
+        <div class="panel-header"><div><span class="panel-step">REGISTRY</span><h2>الإدارات المسجلة</h2><p>القائمة مرتبة حسب قيمة index المخزنة.</p></div><span class="count-chip small-count">@CustomDepartments.Count</span></div>
+        @if (CustomDepartments.Count == 0)
+        {
+            <div class="empty-state">حدد ملف names.json لعرض الإدارات.</div>
+        }
+        else
+        {
+            <div class="table-scroll"><table class="data-table registry-table"><thead><tr><th>#</th><th>الاسم العربي</th><th>Franko slug</th><th>إجراء</th></tr></thead><tbody>
+                @foreach (var department in CustomDepartments.OrderBy(x => x.Index))
+                {
+                    <tr @key="department.Index" class="@(EditingIndex == department.Index ? "editing-row" : "")">
+                        <td class="index-cell">@department.Index</td>
+                        <td><strong>@department.DisplayName</strong></td>
+                        <td><span class="mono slug-cell">@department.Value</span></td>
+                        <td><div class="row-actions"><button class="icon-button" title="تعديل" @onclick="() => BeginEdit(department)">✎</button><button class="icon-button danger-icon" title="حذف" @onclick="() => Delete(department)">×</button></div></td>
+                    </tr>
+                }
+            </tbody></table></div>
+        }
+    </section>
+
+    <aside class="panel editor-panel">
+        @if (EditingIndex is not null)
+        {
+            <div class="panel-header"><div><span class="panel-step">EDIT DEPARTMENT</span><h2>تعديل إدارة</h2><p>لن يتغير الـ slug تلقائياً عند تعديل الاسم العربي.</p></div><div class="panel-icon">✎</div></div>
+            <div class="field-group"><label>رقم السجل</label><input class="text-input" value="@EditingIndex" readonly /></div>
+            <div class="field-group"><label>الاسم العربي <span class="required-mark">*</span></label><input class="text-input" @bind="EditText" /></div>
+            <div class="field-group"><label>Franko slug <span class="required-mark">*</span></label><input class="text-input mono-input" @bind="EditValue" dir="ltr" /></div>
+            <div class="field-hint warning-text">تغيير slug سيؤثر على مطابقة أسماء ملفات CSV مع هذه الإدارة.</div>
+            <div class="form-actions stacked"><button class="btn btn-primary" @onclick="SaveEdit">حفظ التعديل</button><button class="btn btn-ghost" @onclick="CancelEdit">إلغاء</button></div>
+        }
+        else
+        {
+            <div class="panel-header"><div><span class="panel-step">NEW DEPARTMENT</span><h2>إضافة إدارة</h2><p>سيتم إنشاء slug وفق قواعد transliteration المعتمدة.</p></div><div class="panel-icon teal-bg">＋</div></div>
+            <div class="field-group"><label>اسم الإدارة بالعربية <span class="required-mark">*</span></label><input class="text-input" @bind="NewText" @bind:event="oninput" placeholder="مثال: الإدارة العامة للتخطيط" /></div>
+            <div class="generated-slug"><span>الـ slug المقترح</span><strong class="mono" dir="ltr">@GeneratedSlug</strong><small>سيتم حفظ القيمة كما تظهر هنا. لا يعاد توليد slugs الإدارات القديمة.</small></div>
+            <button class="btn btn-primary full-button" @onclick="AddDepartment" disabled="@(string.IsNullOrWhiteSpace(NewText) || string.IsNullOrWhiteSpace(NamesPath))">إضافة إلى names.json</button>
+        }
+        @if (!string.IsNullOrWhiteSpace(Message)) { <div class="alert alert-success">@Message</div> }
+        @if (!string.IsNullOrWhiteSpace(Error)) { <div class="alert alert-error">@Error</div> }
+    </aside>
+</div>
+
+@code {
+    private string NamesPath { get; set; } = string.Empty;
+    private List<DepartmentEntry> CustomDepartments { get; set; } = [];
+    private string NewText { get; set; } = string.Empty;
+    private string EditText { get; set; } = string.Empty;
+    private string EditValue { get; set; } = string.Empty;
+    private int? EditingIndex { get; set; }
+    private string Message { get; set; } = string.Empty;
+    private string Error { get; set; } = string.Empty;
+    private string GeneratedSlug => string.IsNullOrWhiteSpace(NewText) ? "—" : DepartmentSlugGenerator.Generate(NewText);
+
+    protected override async Task OnInitializedAsync()
+    {
+        NamesPath = Workspace.NamesFilePath;
+        await Load();
+    }
+
+    private async Task PickNames()
+    {
+        var path = await Picker.PickFileAsync("اختر ملف names.json", ".json");
+        if (path is null) return;
+        NamesPath = path;
+        Workspace.SetNamesFilePath(path);
+        await Load();
+    }
+
+    private async Task Load()
+    {
+        Message = Error = string.Empty;
+        if (string.IsNullOrWhiteSpace(NamesPath) || !File.Exists(NamesPath))
+        {
+            CustomDepartments = [];
+            return;
+        }
+        try { CustomDepartments = (await Registry.LoadAsync(NamesPath)).ToList(); }
+        catch (Exception ex) { Error = ex.Message; }
+    }
+
+    private async Task AddDepartment()
+    {
+        Message = Error = string.Empty;
+        try
+        {
+            var entry = Registry.Create(NewText, CustomDepartments);
+            CustomDepartments.Add(entry);
+            await Registry.SaveAsync(NamesPath, CustomDepartments);
+            CustomDepartments = (await Registry.LoadAsync(NamesPath)).ToList();
+            NewText = string.Empty;
+            Message = $"تمت إضافة الإدارة وحفظ slug: {entry.Value}";
+        }
+        catch (Exception ex) { Error = ex.Message; }
+    }
+
+    private void BeginEdit(DepartmentEntry entry)
+    {
+        Message = Error = string.Empty;
+        EditingIndex = entry.Index;
+        EditText = entry.Text.Trim();
+        EditValue = entry.Value;
+    }
+
+    private async Task SaveEdit()
+    {
+        Message = Error = string.Empty;
+        try
+        {
+            var entry = CustomDepartments.Single(x => x.Index == EditingIndex);
+            entry.Text = EditText.Trim();
+            entry.Value = EditValue.Trim();
+            await Registry.SaveAsync(NamesPath, CustomDepartments);
+            CustomDepartments = (await Registry.LoadAsync(NamesPath)).ToList();
+            EditingIndex = null;
+            Message = "تم حفظ التعديل في names.json.";
+        }
+        catch (Exception ex) { Error = ex.Message; }
+    }
+
+    private void CancelEdit() => EditingIndex = null;
+
+    private async Task Delete(DepartmentEntry entry)
+    {
+        var confirmed = await JS.InvokeAsync<bool>("confirm", $"هل تريد حذف الإدارة '{entry.DisplayName}' من names.json؟ لن يتم حذف ملفات CSV أو XML.");
+        if (!confirmed) return;
+        Message = Error = string.Empty;
+        try
+        {
+            CustomDepartments.RemoveAll(x => x.Index == entry.Index);
+            await Registry.SaveAsync(NamesPath, CustomDepartments);
+            if (EditingIndex == entry.Index) EditingIndex = null;
+            Message = "تم حذف الإدارة من names.json فقط.";
+        }
+        catch (Exception ex) { Error = ex.Message; }
+    }
+}

@@ -1,0 +1,6 @@
+﻿ID,FieldName,FieldNameAr,FieldType,FieldSize,NotNull,ListValues
+1,asm_almhafza,اسم المحافظة,NVARCHAR,200,True,
+2,asm_almntqa,اسم المنطقة,NVARCHAR,200,True,
+3,rqm_almlf,رقم الملف,NVARCHAR,200,True,
+5,rqm_alqtah_mn,رقم القطعه من,NVARCHAR,200,True,
+6,rqm_alqtah_aly,رقم القطعه الي,NVARCHAR,200,True,

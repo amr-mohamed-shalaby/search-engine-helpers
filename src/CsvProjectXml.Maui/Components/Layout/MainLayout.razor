@@ -1,0 +1,45 @@
+@inherits LayoutComponentBase
+
+<div class="shell" dir="rtl">
+    <aside class="sidebar">
+        <div class="brand">
+            <div class="brand-mark">XML</div>
+            <div>
+                <div class="brand-title">محوّل بيانات المشروعات</div>
+                <div class="brand-subtitle">CSV → Project XML · V2</div>
+            </div>
+        </div>
+        <div class="nav-caption">مساحة العمل</div>
+        <nav class="nav-links">
+            <NavLink href="/" Match="NavLinkMatch.All" class="nav-link">
+                <span class="nav-icon">⌂</span><span>الرئيسية</span>
+            </NavLink>
+            <NavLink href="/convert" class="nav-link">
+                <span class="nav-icon">⇄</span><span>تحويل الملفات</span>
+            </NavLink>
+            <NavLink href="/departments" class="nav-link">
+                <span class="nav-icon">▦</span><span>إدارة الإدارات</span>
+            </NavLink>
+            <NavLink href="/settings" class="nav-link">
+                <span class="nav-icon">⚙</span><span>إعدادات التصدير</span>
+            </NavLink>
+        </nav>
+        <div class="sidebar-foot">
+            <span class="online-dot"></span>
+            <span>معالجة محلية · بدون اتصال بالإنترنت</span>
+        </div>
+    </aside>
+    <main class="main-area">
+        <header class="topbar">
+            <div>
+                <div class="eyebrow">INDUSTRIAL ARCHIVE TOOLS</div>
+                <div class="topbar-title">CSV to Project XML</div>
+            </div>
+            <div class="version-chip">الإصدار 2.0</div>
+        </header>
+        <section class="page-content">
+            @Body
+        </section>
+        <footer class="footer">أداة داخلية لتحويل بيانات الإدارات إلى حزمة XML متوافقة مع النظام الحالي.</footer>
+    </main>
+</div>

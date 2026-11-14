@@ -1,0 +1,20 @@
+<div class="panel result-files-panel">
+    <div class="result-files-head"><div><h3>ملفات XML الناتجة</h3><p class="mono path-line">@OutputDirectory</p></div><span class="file-count">4 ملفات</span></div>
+    <div class="result-file-grid">
+        @foreach (var file in Files)
+        {
+            <div class="result-file-card">
+                <div class="result-file-top"><span class="result-file-icon">XML</span><span class="file-size">@FormatBytes(file.SizeBytes)</span></div>
+                <strong>@file.FileName</strong>
+                <div class="hash-label">SHA-256</div>
+                <div class="hash-value" title="@file.Sha256">@file.Sha256</div>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<OutputFileSummary> Files { get; set; } = [];
+    [Parameter, EditorRequired] public string OutputDirectory { get; set; } = string.Empty;
+    private static string FormatBytes(long bytes) => bytes < 1024 ? $"{bytes} B" : $"{bytes / 1024d:N1} KB";
+}

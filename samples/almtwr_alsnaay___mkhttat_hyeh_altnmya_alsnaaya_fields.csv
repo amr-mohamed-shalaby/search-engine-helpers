@@ -1,0 +1,5 @@
+﻿ID,FieldName,FieldNameAr,FieldType,FieldSize,NotNull,ListValues
+1,asm_alshrka,اسم الشركة,NVARCHAR,200,True,
+2,rqm_alqtah,رقم القطعه,NVARCHAR,200,True,
+3,almdyna,المدينة,NVARCHAR,200,True,
+4,tarykh_alaatmad,تاريخ الاعتماد,NVARCHAR,200,True,

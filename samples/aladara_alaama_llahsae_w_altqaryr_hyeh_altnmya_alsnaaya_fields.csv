@@ -1,0 +1,3 @@
+﻿ID,FieldName,FieldNameAr,FieldType,FieldSize,NotNull,ListValues
+1,shhr,شهر,NVARCHAR,255,True,
+2,sna,سنة,NVARCHAR,255,True,

@@ -1,0 +1,426 @@
+using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.RegularExpressions;
+using CsvProjectXml.Core.Models;
+
+namespace CsvProjectXml.Core.Services;
+
+public sealed class CsvProjectConverter
+{
+    private readonly IReadOnlyList<IDataValueFeature> _features;
+
+    public CsvProjectConverter(IEnumerable<IDataValueFeature>? features = null)
+    {
+        _features = features?.ToArray() ?? [];
+    }
+
+    private static readonly string[] FieldsHeader =
+        ["ID", "FieldName", "FieldNameAr", "FieldType", "FieldSize", "NotNull", "ListValues"];
+    private static readonly string[] DataFixedHeader = ["ID", "FilmId", "FilmType", "PortfolioId"];
+    private static readonly string[] OutputFiles =
+        ["Project.xml", "Project_Fields.xml", "Project_Data.xml", "Project_lookup_Fields.xml"];
+    private static readonly Regex XmlTagName = new("^[A-Za-z_][A-Za-z0-9_.-]*$", RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    public DepartmentConversionResult Convert(ConversionRequest request, ConversionSettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(settings);
+        ValidateRequest(request, settings);
+        ValidateEnabledFeatures(settings);
+
+        var fields = ReadFields(request.FieldsCsvPath, settings);
+        var folderName = request.FolderNameMode == OutputFolderNameMode.ArabicDisplayName
+            ? request.Department.DisplayName
+            : request.Department.Value;
+        ValidateFolderSegment(folderName);
+        var outputRoot = Path.GetFullPath(request.OutputRoot);
+        Directory.CreateDirectory(outputRoot);
+        var targetDirectory = Path.Combine(outputRoot, folderName);
+        ValidateExistingOutputDirectory(targetDirectory);
+
+        var stamp = request.TimestampOverride ?? DateTime.Now.ToString(settings.TimestampFormat, CultureInfo.InvariantCulture);
+        ValidateTimestamp(stamp, request.DataCsvPath);
+
+        var stagingDirectory = Path.Combine(outputRoot, $".{folderName}.staging-{Guid.NewGuid():N}");
+        var backupDirectory = Path.Combine(outputRoot, $".{folderName}.backup-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(stagingDirectory);
+
+        try
+        {
+            WriteProjectXml(Path.Combine(stagingDirectory, "Project.xml"), request.Department.Value, stamp, settings);
+            WriteFieldsXml(Path.Combine(stagingDirectory, "Project_Fields.xml"), fields, settings);
+            var (rowCount, filmCount) = WriteDataXml(
+                Path.Combine(stagingDirectory, "Project_Data.xml"), request.DataCsvPath, fields, settings);
+            File.WriteAllBytes(Path.Combine(stagingDirectory, "Project_lookup_Fields.xml"),
+                Encoding.UTF8.GetBytes("<DocumentElement/>"));
+
+            var summaries = OutputFiles.Select(fileName =>
+            {
+                var path = Path.Combine(stagingDirectory, fileName);
+                var info = new FileInfo(path);
+                using var file = File.OpenRead(path);
+                var hash = System.Convert.ToHexString(SHA256.HashData(file)).ToLowerInvariant();
+                return new OutputFileSummary(fileName, info.Length, hash);
+            }).ToArray();
+
+            CommitDirectory(stagingDirectory, targetDirectory, backupDirectory);
+            return new DepartmentConversionResult(request.Department.Value, request.Department.DisplayName,
+                targetDirectory, rowCount, filmCount, fields.Count, summaries);
+        }
+        catch
+        {
+            if (Directory.Exists(stagingDirectory)) Directory.Delete(stagingDirectory, recursive: true);
+            if (Directory.Exists(backupDirectory) && !Directory.Exists(targetDirectory))
+                Directory.Move(backupDirectory, targetDirectory);
+            throw;
+        }
+    }
+
+    private void ValidateEnabledFeatures(ConversionSettings settings)
+    {
+        var knownIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var feature in _features)
+        {
+            if (string.IsNullOrWhiteSpace(feature.Id) || !knownIds.Add(feature.Id))
+                throw new ConversionException($"Feature registration contains an empty or duplicate feature ID '{feature.Id}'.");
+        }
+
+        foreach (var enabledId in settings.EnabledFeatureIds ?? [])
+        {
+            if (!knownIds.Contains(enabledId))
+                throw new ConversionException($"Feature '{enabledId}' is enabled in settings but is not registered in this application build.");
+        }
+    }
+
+    private static List<FieldDefinition> ReadFields(string path, ConversionSettings settings)
+    {
+        using var enumerator = ReadCsvRecords(path).GetEnumerator();
+        if (!enumerator.MoveNext())
+            throw new ConversionException("The fields CSV is empty.", path, 1, "Header");
+
+        var header = enumerator.Current;
+        ValidateExactHeader(header, FieldsHeader, path, "Fields CSV");
+        var definitions = new List<FieldDefinition>();
+        var names = new HashSet<string>(StringComparer.Ordinal);
+
+        while (enumerator.MoveNext())
+        {
+            var row = enumerator.Current;
+            ValidateColumnCount(row, FieldsHeader.Length, path, FieldsHeader);
+            // V1 does not use the source field ID or NotNull flag in the XML.
+            // Preserve the ID as data and only validate NotNull when that optional rule is enabled.
+            var sourceId = row.Values[0];
+            var fieldName = row.Values[1];
+            var fieldNameAr = row.Values[2];
+            var fieldType = row.Values[3].Trim().ToUpperInvariant();
+            var fieldSize = ParseInt(row.Values[4], path, row.StartLine, "FieldSize");
+            var notNull = false;
+            if (settings.ValidateNotNull && !bool.TryParse(row.Values[5], out notNull))
+                throw new ConversionException($"'{row.Values[5]}' is not a valid boolean (True or False).",
+                    path, row.StartLine, "NotNull");
+            var listValues = row.Values[6];
+
+            if (!XmlTagName.IsMatch(fieldName))
+                throw new ConversionException($"'{fieldName}' is not a valid supported XML element name. Use ASCII letters, digits, '_' or '-'.",
+                    path, row.StartLine, "FieldName");
+            if (new[] { "FILM_NUMBER", "FILM_TYPE", "PHOTO_PATH" }.Contains(fieldName, StringComparer.OrdinalIgnoreCase))
+                throw new ConversionException($"'{fieldName}' conflicts with a system field name.",
+                    path, row.StartLine, "FieldName");
+            if (!names.Add(fieldName))
+                throw new ConversionException($"Duplicate FieldName '{fieldName}'.", path, row.StartLine, "FieldName");
+            if (fieldSize < 0)
+                throw new ConversionException("FieldSize cannot be negative.", path, row.StartLine, "FieldSize");
+            if (listValues.Length > 0)
+                throw new ConversionException("Non-empty ListValues cannot be exported: the V1 lookup XML format is unknown.",
+                    path, row.StartLine, "ListValues");
+
+            var typeMap = settings.FieldTypeMap ?? throw new ConversionException("FieldTypeMap is missing from settings.");
+            var typeMatch = typeMap.FirstOrDefault(x => string.Equals(x.Key, fieldType, StringComparison.OrdinalIgnoreCase));
+            if (typeMatch.Key is null)
+                throw new ConversionException($"FieldType '{fieldType}' is not mapped. Add an explicit mapping in conversion-settings.json.",
+                    path, row.StartLine, "FieldType");
+
+            XmlText.ValidateXml10(fieldName, path, row.StartLine, "FieldName");
+            XmlText.ValidateXml10(fieldNameAr, path, row.StartLine, "FieldNameAr");
+            definitions.Add(new FieldDefinition(sourceId, fieldName, fieldNameAr, fieldType,
+                fieldSize, notNull, listValues, typeMatch.Value));
+        }
+
+        return definitions;
+    }
+
+    private (long RowCount, int FilmCount) WriteDataXml(string outputPath, string csvPath,
+        IReadOnlyList<FieldDefinition> fields, ConversionSettings settings)
+    {
+        using var enumerator = ReadCsvRecords(csvPath).GetEnumerator();
+        if (!enumerator.MoveNext())
+            throw new ConversionException("The data CSV is empty.", csvPath, 1, "Header");
+
+        var header = enumerator.Current;
+        var expected = DataFixedHeader.Concat(fields.Select(x => x.FieldName)).ToArray();
+        ValidateExactHeader(header, expected, csvPath, "Data CSV");
+
+        using var writer = new XmlLineWriter(outputPath);
+        writer.WriteLine("<?xml version=\"1.0\" encoding=\"UTF-8\"?>");
+        writer.WriteLine("<DocumentElement>");
+
+        long rowCount = 0;
+        var films = new HashSet<long>();
+        var portfolios = new HashSet<(long FilmId, long PortfolioId)>();
+
+        while (enumerator.MoveNext())
+        {
+            var row = enumerator.Current;
+            ValidateColumnCount(row, expected.Length, csvPath, expected);
+            var values = row.Values;
+            var filmIdRaw = values[1];
+            var filmTypeRaw = values[2];
+            var portfolioRaw = values[3];
+            var filmId = ParseNonNegativeLong(filmIdRaw, csvPath, row.StartLine, "FilmId");
+            var filmType = ParseNonNegativeLong(filmTypeRaw, csvPath, row.StartLine, "FilmType");
+            var portfolioId = ParseNonNegativeLong(portfolioRaw, csvPath, row.StartLine, "PortfolioId");
+
+            if (!portfolios.Add((filmId, portfolioId)))
+                throw new ConversionException($"Duplicate (FilmId, PortfolioId) pair ({filmIdRaw}, {portfolioRaw}).",
+                    csvPath, row.StartLine, "FilmId/PortfolioId");
+            films.Add(filmId);
+
+            writer.WriteLine("\t<Data>");
+            WriteDataTag(writer, "FILM_NUMBER", filmIdRaw, csvPath, row.StartLine, "FilmId", settings);
+            WriteDataTag(writer, "FILM_TYPE", filmTypeRaw, csvPath, row.StartLine, "FilmType", settings);
+            var photoPath = $"\\Scan_Tree\\{filmTypeRaw}\\{filmIdRaw}\\Film\\{portfolioRaw}";
+            WriteDataTag(writer, "PHOTO_PATH", photoPath, csvPath, row.StartLine, "PortfolioId", settings);
+
+            for (var index = 0; index < fields.Count; index++)
+            {
+                var field = fields[index];
+                var value = values[index + DataFixedHeader.Length];
+                var rowContext = new DataRowContext(values[0], filmId, filmType, portfolioId, csvPath, row.StartLine);
+                foreach (var feature in _features)
+                {
+                    if ((settings.EnabledFeatureIds ?? []).Contains(feature.Id, StringComparer.OrdinalIgnoreCase))
+                        value = feature.Transform(value, field, rowContext);
+                }
+                if (settings.ValidateFieldSize && value.Length > field.FieldSize)
+                    throw new ConversionException($"Value length {value.Length} exceeds FieldSize {field.FieldSize}.",
+                        csvPath, row.StartLine, field.FieldName);
+                if (settings.ValidateNotNull && field.NotNull && value.Length == 0)
+                    throw new ConversionException("The field is marked NotNull but the value is empty.",
+                        csvPath, row.StartLine, field.FieldName);
+                WriteDataTag(writer, field.FieldName, value, csvPath, row.StartLine, field.FieldName, settings);
+            }
+
+            writer.WriteLine("\t</Data>");
+            rowCount++;
+        }
+
+        writer.WriteLine("</DocumentElement>");
+        writer.Flush();
+        return (rowCount, films.Count);
+    }
+
+    private static void WriteProjectXml(string path, string slug, string stamp, ConversionSettings settings)
+    {
+        using var writer = new XmlLineWriter(path);
+        writer.WriteLine("<DocumentElement>");
+        writer.WriteLine("\t<Project>");
+        WriteTag(writer, 2, "PROJECT_CODE", settings.ProjectCode.ToString(CultureInfo.InvariantCulture));
+        WriteTag(writer, 2, "PROJECT_SHORT_DESC", slug);
+        WriteTag(writer, 2, "PROJECT_NAME", slug);
+        WriteTag(writer, 2, "PROJECT_PATH", settings.ProjectCode.ToString(CultureInfo.InvariantCulture));
+        WriteTag(writer, 2, "START_DATE", stamp);
+        WriteTag(writer, 2, "END_DATE", stamp);
+        WriteTag(writer, 2, "IS_CIVIL", settings.IsCivil.ToString(CultureInfo.InvariantCulture));
+        WriteTag(writer, 2, "USER_CREATION_DATE", stamp);
+        WriteTag(writer, 2, "USER_MODIFICATION_CODE", settings.UserModificationCode.ToString(CultureInfo.InvariantCulture));
+        WriteTag(writer, 2, "IS_STRUCTURE_CREATED", settings.IsStructureCreated.ToString(CultureInfo.InvariantCulture));
+        WriteTag(writer, 2, "ORG_CODE", settings.OrgCode.ToString(CultureInfo.InvariantCulture));
+        writer.WriteLine("\t</Project>");
+        writer.WriteLine("</DocumentElement>");
+    }
+
+    private static void WriteFieldsXml(string path, IReadOnlyList<FieldDefinition> fields, ConversionSettings settings)
+    {
+        using var writer = new XmlLineWriter(path);
+        writer.WriteLine("<DocumentElement>");
+        WriteFieldBlock(writer, "FILM_NUMBER", "رقم الفيلم", 2, 5, 2, 2, settings);
+        WriteFieldBlock(writer, "FILM_TYPE", "نوع الفيلم", 5, 25, 1, 1, settings);
+        for (var index = 0; index < fields.Count; index++)
+        {
+            var field = fields[index];
+            WriteFieldBlock(writer, field.FieldName, field.FieldNameAr, field.XmlFieldType,
+                field.FieldSize, 3 + index, 0, settings, docKey: 0);
+        }
+        writer.WriteLine("</DocumentElement>");
+    }
+
+    private static void WriteFieldBlock(XmlLineWriter writer, string name, string nameAr, int type,
+        int width, int orderPage, int orderTree, ConversionSettings settings, int docKey = 2)
+    {
+        writer.WriteLine("\t<Project_Fields>");
+        WriteTag(writer, 2, "PROJECT_CODE", settings.ProjectCode.ToString(CultureInfo.InvariantCulture));
+        WriteTag(writer, 2, "FIELD_NAME_ENG", name);
+        WriteTag(writer, 2, "FIELD_NAME_AR", nameAr);
+        WriteTag(writer, 2, "FIELD_TYPE", type.ToString(CultureInfo.InvariantCulture));
+        WriteTag(writer, 2, "FIELD_WIDTH", width.ToString(CultureInfo.InvariantCulture));
+        WriteTag(writer, 2, "IS_UNIQUE", "0");
+        WriteTag(writer, 2, "IS_DOC_KEY", docKey.ToString(CultureInfo.InvariantCulture));
+        WriteTag(writer, 2, "FIELD_ORDER_PAGE", orderPage.ToString(CultureInfo.InvariantCulture));
+        WriteTag(writer, 2, "FIELD_ORDER_TREE", orderTree.ToString(CultureInfo.InvariantCulture));
+        WriteTag(writer, 2, "IS_FILE_BARCODE", "0");
+        WriteTag(writer, 2, "IS_FILM_BARCODE", "0");
+        WriteTag(writer, 2, "IS_SEPARATOR", "0");
+        WriteTag(writer, 2, "FIELD_NAME_ENG_DEP", "0");
+        writer.WriteLine("\t</Project_Fields>");
+    }
+
+    private static void WriteDataTag(XmlLineWriter writer, string name, string value, string filePath,
+        int line, string column, ConversionSettings settings)
+    {
+        XmlText.ValidateXml10(value, filePath, line, column);
+        var escaped = XmlText.Escape(value);
+        var tag = settings.EmptyValueMode == EmptyValueMode.SelfClosingTags && value.Length == 0
+            ? $"\t\t<{name}/>"
+            : $"\t\t<{name}>{escaped}</{name}>";
+        writer.WriteLine(tag);
+    }
+
+    private static void WriteTag(XmlLineWriter writer, int indent, string name, string value)
+    {
+        var escaped = XmlText.Escape(value);
+        writer.WriteLine($"{new string('\t', indent)}<{name}>{escaped}</{name}>");
+    }
+
+    private static IEnumerable<CsvRecord> ReadCsvRecords(string path)
+    {
+        using var enumerator = CsvReader.Read(path).GetEnumerator();
+        while (true)
+        {
+            bool hasNext;
+            try
+            {
+                hasNext = enumerator.MoveNext();
+            }
+            catch (CsvFormatException ex)
+            {
+                throw new ConversionException(ex.Message, ex.FilePath, ex.LineNumber,
+                    $"#{ex.ColumnNumber}", ex);
+            }
+            catch (DecoderFallbackException ex)
+            {
+                throw new ConversionException("The CSV contains invalid UTF-8 byte sequences.", path, 1, "File", ex);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
+            {
+                throw new ConversionException(ex.Message, path, 1, "File", ex);
+            }
+
+            if (!hasNext) yield break;
+            yield return enumerator.Current;
+        }
+    }
+
+    private static void ValidateExactHeader(CsvRecord record, IReadOnlyList<string> expected, string path, string label)
+    {
+        if (record.Values.Count != expected.Count)
+        {
+            var column = record.Values.Count > expected.Count
+                ? $"#{expected.Count + 1} (unexpected extra column)"
+                : $"{expected[record.Values.Count]} (missing)";
+            throw new ConversionException($"{label} header has {record.Values.Count} columns; expected {expected.Count}.",
+                path, record.StartLine, column);
+        }
+
+        for (var index = 0; index < expected.Count; index++)
+        {
+            if (!string.Equals(record.Values[index], expected[index], StringComparison.Ordinal))
+                throw new ConversionException($"Expected header '{expected[index]}' but found '{record.Values[index]}'.",
+                    path, record.StartLine, expected[index]);
+        }
+    }
+
+    private static void ValidateColumnCount(CsvRecord row, int expectedCount, string path, IReadOnlyList<string> columns)
+    {
+        if (row.Values.Count == expectedCount) return;
+        var column = row.Values.Count > expectedCount
+            ? $"#{expectedCount + 1} (unexpected extra column)"
+            : columns[row.Values.Count];
+        throw new ConversionException($"Row has {row.Values.Count} columns; expected {expectedCount}.",
+            path, row.StartLine, column);
+    }
+
+    private static int ParseInt(string value, string path, int line, string column)
+    {
+        if (int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var result)) return result;
+        throw new ConversionException($"'{value}' is not a valid integer.", path, line, column);
+    }
+
+    private static long ParseNonNegativeLong(string value, string path, int line, string column)
+    {
+        if (long.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var result) && result >= 0) return result;
+        throw new ConversionException($"'{value}' is not a non-negative integer.", path, line, column);
+    }
+
+    private static void ValidateRequest(ConversionRequest request, ConversionSettings settings)
+    {
+        if (!File.Exists(request.FieldsCsvPath)) throw new FileNotFoundException("Fields CSV was not found.", request.FieldsCsvPath);
+        if (!File.Exists(request.DataCsvPath)) throw new FileNotFoundException("Data CSV was not found.", request.DataCsvPath);
+        if (string.IsNullOrWhiteSpace(request.OutputRoot)) throw new ArgumentException("Output folder is required.");
+        if (string.IsNullOrWhiteSpace(request.Department.Value)) throw new ArgumentException("Department slug is required.");
+        if (!Regex.IsMatch(request.Department.Value, "^[A-Za-z0-9_]+$", RegexOptions.CultureInvariant))
+            throw new ArgumentException("Department slug can contain ASCII letters, digits, and underscores only.");
+        if (!string.IsNullOrEmpty(request.TimestampOverride) && request.TimestampOverride.Contains('\0'))
+            throw new ArgumentException("Timestamp contains an invalid null character.");
+        if (string.IsNullOrWhiteSpace(settings.TimestampFormat)) throw new ConversionException("TimestampFormat cannot be empty.");
+    }
+
+    private static void ValidateTimestamp(string stamp, string sourceFile)
+    {
+        if (stamp.Length == 0) throw new ConversionException("Timestamp cannot be empty.", sourceFile, 1, "Timestamp");
+        XmlText.ValidateXml10(stamp, sourceFile, 1, "Timestamp");
+    }
+
+    private static void ValidateFolderSegment(string folderName)
+    {
+        if (string.IsNullOrWhiteSpace(folderName) || folderName is "." or "..")
+            throw new ConversionException("The output folder name is empty or invalid.");
+        if (folderName.EndsWith(' ') || folderName.EndsWith('.'))
+            throw new ConversionException("Windows folder names cannot end with a space or a period.");
+        if (folderName.IndexOfAny("<>:\"/\\|?*".ToCharArray()) >= 0)
+            throw new ConversionException($"The output folder name '{folderName}' contains a character not allowed in a Windows folder name.");
+        var reserved = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            { "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9" };
+        if (reserved.Contains(folderName.Split('.')[0]))
+            throw new ConversionException($"'{folderName}' is a reserved Windows folder name.");
+    }
+
+    private static void ValidateExistingOutputDirectory(string path)
+    {
+        if (!Directory.Exists(path)) return;
+        var unexpectedFiles = Directory.EnumerateFiles(path)
+            .Select(file => Path.GetFileName(file)!)
+            .Where(name => !OutputFiles.Contains(name, StringComparer.Ordinal))
+            .ToArray();
+        var childDirectories = Directory.EnumerateDirectories(path).ToArray();
+        if (unexpectedFiles.Length > 0 || childDirectories.Length > 0)
+            throw new ConversionException($"Output folder '{path}' contains unrelated files or subdirectories; it will not be overwritten.");
+    }
+
+    private static void CommitDirectory(string stagingDirectory, string targetDirectory, string backupDirectory)
+    {
+        var hadTarget = Directory.Exists(targetDirectory);
+        if (hadTarget) Directory.Move(targetDirectory, backupDirectory);
+        try
+        {
+            Directory.Move(stagingDirectory, targetDirectory);
+            if (hadTarget) Directory.Delete(backupDirectory, recursive: true);
+        }
+        catch
+        {
+            if (Directory.Exists(targetDirectory)) Directory.Delete(targetDirectory, recursive: true);
+            if (hadTarget && Directory.Exists(backupDirectory)) Directory.Move(backupDirectory, targetDirectory);
+            throw;
+        }
+    }
+}

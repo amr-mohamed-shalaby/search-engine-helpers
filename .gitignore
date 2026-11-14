@@ -1,0 +1,26 @@
+## .NET / Visual Studio
+[Bb]in/
+[Oo]bj/
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+## MAUI / workloads
+*.appx
+*.msix
+*.msixbundle
+*.appxbundle
+*.appinstaller
+*.cer
+*.pfx
+
+## Test output
+TestResults/
+coverage/
+
+## Local app/project state and generated XML
+conversion-settings.json
+*.staging-*/
+*.backup-*/

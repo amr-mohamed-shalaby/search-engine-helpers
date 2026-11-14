@@ -1,0 +1,87 @@
+@page "/settings"
+@inject WorkspaceState Workspace
+@inject ConversionSettingsStore SettingsStore
+
+<PageTitle>إعدادات التصدير · CSV to Project XML</PageTitle>
+
+<div class="page-heading">
+    <div><div class="eyebrow">EXPORT CONFIGURATION</div><h1>إعدادات التصدير</h1><p>القيم الافتراضية تطابق القيم التي ظهرت في ملفات V1. غيّرها فقط حسب إعدادات النظام المستورد.</p></div>
+    <div class="status-pill"><span></span> إعدادات قابلة للحفظ</div>
+</div>
+
+<div class="settings-layout">
+    <section class="panel settings-panel">
+        <div class="panel-header"><div><span class="panel-step">PROJECT METADATA</span><h2>بيانات المشروع الثابتة</h2><p>تُستخدم هذه القيم في Project.xml و Project_Fields.xml.</p></div><div class="panel-icon">⌘</div></div>
+        <div class="settings-grid">
+            <div class="field-group"><label>PROJECT_CODE</label><input class="text-input" type="number" @bind="CustomSettings.ProjectCode" /></div>
+            <div class="field-group"><label>ORG_CODE</label><input class="text-input" type="number" @bind="CustomSettings.OrgCode" /></div>
+            <div class="field-group"><label>USER_MODIFICATION_CODE</label><input class="text-input" type="number" @bind="CustomSettings.UserModificationCode" /></div>
+            <div class="field-group"><label>IS_CIVIL</label><input class="text-input" type="number" @bind="CustomSettings.IsCivil" /></div>
+            <div class="field-group"><label>IS_STRUCTURE_CREATED</label><input class="text-input" type="number" @bind="CustomSettings.IsStructureCreated" /></div>
+        </div>
+        <div class="divider-line"></div>
+        <div class="panel-header compact"><div><span class="panel-step">TIMESTAMP</span><h2>تنسيق التاريخ والوقت</h2><p>التوقيت الافتراضي هو الوقت المحلي للجهاز مع تنسيق إنجليزي ثابت.</p></div></div>
+        <div class="field-group"><label>Timestamp format</label><input class="text-input mono-input" @bind="CustomSettings.TimestampFormat" dir="ltr" /><div class="field-hint">الافتراضي: MM/dd/yyyy hh:mm:ss tt · استخدم dd/MM/yyyy إذا أكد النظام ذلك.</div></div>
+        <div class="divider-line"></div>
+        <div class="panel-header compact"><div><span class="panel-step">EMPTY VALUES</span><h2>طريقة إخراج القيم الفارغة</h2><p>سلوك V1 غير معروف في هذه الحالة؛ لذلك تم اختياره صراحةً كإعداد.</p></div></div>
+        <div class="field-group"><label>XML empty element</label><select class="text-input" @bind="CustomSettings.EmptyValueMode"><option value="PairedTags">&lt;field&gt;&lt;/field&gt; — paired tags (default)</option><option value="SelfClosingTags">&lt;field/&gt; — self-closing tag</option></select></div>
+        <div class="divider-line"></div>
+        <div class="panel-header compact"><div><span class="panel-step">VALIDATION</span><h2>قواعد التحقق الاختيارية</h2><p>لا تغيّر القيم في وضع التوافق؛ هذه الخيارات تتحكم في إيقاف التحويل عند وجود مشكلة.</p></div></div>
+        <label class="check-row settings-check"><input type="checkbox" @bind="CustomSettings.ValidateFieldSize" /><span><strong>التحقق من FieldSize</strong><small>إيقاف الإدارة إذا تجاوز طول القيمة الحجم المحدد للحقل.</small></span></label>
+        <label class="check-row settings-check"><input type="checkbox" @bind="CustomSettings.ValidateNotNull" /><span><strong>تطبيق NotNull</strong><small>V1 يتجاهل هذا العلم. تفعيل الخيار يجعل القيمة الفارغة في حقل NotNull سبباً للفشل.</small></span></label>
+        <div class="divider-line"></div>
+        <div class="panel-header compact"><div><span class="panel-step">FIELD TYPE MAP</span><h2>خريطة أنواع الحقول</h2><p>كل نوع يجب أن يكون له كود صريح. النوع غير المسجل يوقف التحويل بدلاً من التخمين.</p></div></div>
+        <div class="field-group"><label>صيغة KEY=VALUE — سطر لكل نوع</label><textarea class="text-input map-textarea mono-input" @bind="FieldTypeMapText" dir="ltr" spellcheck="false"></textarea><div class="field-hint">المبدئي: NVARCHAR=1. لا تضف نوعاً إلا بعد معرفة كود النظام المستورد.</div></div>
+        <div class="form-actions"><button class="btn btn-primary" @onclick="Save">حفظ الإعدادات</button><button class="btn btn-ghost" @onclick="Load">إعادة تحميل</button></div>
+        @if (!string.IsNullOrWhiteSpace(Message)) { <div class="alert alert-success">@Message</div> }
+        @if (!string.IsNullOrWhiteSpace(Error)) { <div class="alert alert-error">@Error</div> }
+    </section>
+    <aside class="panel settings-aside">
+        <div class="side-panel-top"><div class="settings-icon-large">⚙</div><h3>ملف الإعدادات</h3><p class="mono">conversion-settings.json</p><small>@(string.IsNullOrWhiteSpace(Workspace.SettingsFilePath) ? "حدد names.json أولاً من إدارة الإدارات." : Workspace.SettingsFilePath)</small></div>
+        <div class="side-tip"><strong>مهم</strong><p>الإعدادات تُحفظ بجوار names.json، وتُستخدم في التحويل الفردي والجماعي. احتفظ بنسخة منها عند نقل مساحة العمل إلى جهاز آخر.</p></div>
+    </aside>
+</div>
+
+@code {
+    private ConversionSettings CustomSettings { get; set; } = new();
+    private string FieldTypeMapText { get; set; } = "NVARCHAR=1";
+    private string Message { get; set; } = string.Empty;
+    private string Error { get; set; } = string.Empty;
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    private async Task Load()
+    {
+        Message = Error = string.Empty;
+        if (string.IsNullOrWhiteSpace(Workspace.SettingsFilePath))
+        {
+            CustomSettings = new ConversionSettings();
+        }
+        else CustomSettings = await SettingsStore.LoadAsync(Workspace.SettingsFilePath);
+        FieldTypeMapText = string.Join(Environment.NewLine, CustomSettings.FieldTypeMap.Select(x => $"{x.Key}={x.Value}"));
+    }
+
+    private async Task Save()
+    {
+        Message = Error = string.Empty;
+        try
+        {
+            if (string.IsNullOrWhiteSpace(Workspace.SettingsFilePath))
+                throw new InvalidOperationException("حدد ملف names.json أولاً من صفحة إدارة الإدارات.");
+            var map = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            foreach (var line in FieldTypeMapText.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                var parts = line.Split('=', 2, StringSplitOptions.TrimEntries);
+                if (parts.Length != 2 || string.IsNullOrWhiteSpace(parts[0]) || !int.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out var code))
+                    throw new InvalidOperationException($"صيغة خريطة الأنواع غير صحيحة: {line}");
+                if (!map.TryAdd(parts[0].ToUpperInvariant(), code))
+                    throw new InvalidOperationException($"نوع الحقل مكرر: {parts[0]}");
+            }
+            if (map.Count == 0) throw new InvalidOperationException("يجب تسجيل نوع حقل واحد على الأقل.");
+            CustomSettings.FieldTypeMap = map;
+            await SettingsStore.SaveAsync(Workspace.SettingsFilePath, CustomSettings);
+            Message = "تم حفظ إعدادات التحويل بنجاح.";
+        }
+        catch (Exception ex) { Error = ex.Message; }
+    }
+}

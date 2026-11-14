@@ -1,0 +1,305 @@
+@page "/convert"
+@inject IPathPicker Picker
+@inject WorkspaceState Workspace
+@inject NamesRegistryService NamesRegistry
+@inject ConversionSettingsStore SettingsStore
+@inject CsvProjectConverter Converter
+@inject BatchConversionService BatchConverter
+@inject ConversionReportWriter ReportWriter
+
+<PageTitle>تحويل الملفات · CSV to Project XML</PageTitle>
+
+<div class="page-heading">
+    <div>
+        <div class="eyebrow">CONVERSION WORKSPACE</div>
+        <h1>تحويل ملفات CSV</h1>
+        <p>اختر مشروعاً واحداً أو مجلد الإدخال لمعالجة كل الإدارات الموجودة في سجل الأسماء.</p>
+    </div>
+    <div class="status-pill"><span></span> وضع محلي آمن</div>
+</div>
+
+<div class="mode-switch">
+    <button class="mode-option @(Mode == "single" ? "selected" : "")" @onclick="SetSingleMode">
+        <span class="mode-number">01</span><span><strong>مشروع واحد</strong><small>تحديد ملف البيانات وملف الحقول</small></span>
+    </button>
+    <button class="mode-option @(Mode == "batch" ? "selected" : "")" @onclick="SetBatchMode">
+        <span class="mode-number">02</span><span><strong>معالجة جماعية</strong><small>قراءة كل أزواج CSV داخل مجلد</small></span>
+    </button>
+</div>
+
+<div class="workspace-grid">
+    <div class="panel main-panel">
+        <div class="panel-header">
+            <div><span class="panel-step">الخطوة 1</span><h2>مصادر البيانات</h2><p>يتم استخدام أسماء الملفات لمطابقة الإدارة تلقائياً مع names.json.</p></div>
+            <div class="panel-icon">⌕</div>
+        </div>
+
+        <div class="field-group">
+            <label>ملف سجل الإدارات <span class="required-mark">*</span></label>
+            <div class="path-picker">
+                <input class="text-input path-input" readonly value="@NamesPath" placeholder="اختر names.json" />
+                <button class="btn btn-outline" @onclick="PickNames">استعراض</button>
+            </div>
+            <div class="field-hint">يحتوي على value (Franko slug) و text (الاسم العربي).</div>
+        </div>
+
+        @if (Mode == "single")
+        {
+            <div class="field-group">
+                <label>ملف البيانات <span class="required-mark">*</span></label>
+                <div class="path-picker"><input class="text-input path-input" readonly value="@DataCsvPath" placeholder="department_data.csv" /><button class="btn btn-outline" @onclick="PickData">استعراض</button></div>
+            </div>
+            <div class="field-group">
+                <label>ملف تعريف الحقول <span class="required-mark">*</span></label>
+                <div class="path-picker"><input class="text-input path-input" readonly value="@FieldsCsvPath" placeholder="department_fields.csv" /><button class="btn btn-outline" @onclick="PickFields">استعراض</button></div>
+            </div>
+            <div class="match-preview">
+                <div class="match-icon">✓</div>
+                <div><strong>مطابقة اسم الإدارة تلقائياً</strong><p>@(MatchedDepartment is null ? "اختر ملفي CSV المتوافقين لعرض الإدارة المطابقة." : $"{MatchedDepartment.DisplayName} · {MatchedDepartment.Value}")</p></div>
+            </div>
+        }
+        else
+        {
+            <div class="field-group">
+                <label>مجلد ملفات CSV <span class="required-mark">*</span></label>
+                <div class="path-picker"><input class="text-input path-input" readonly value="@InputFolder" placeholder="المجلد الذي يحتوي على ملفات الإدارات" /><button class="btn btn-outline" @onclick="PickInputFolder">اختيار مجلد</button></div>
+                <div class="field-hint">يتوقع أزواجاً بالاسمين &lt;slug&gt;_fields.csv و &lt;slug&gt;_data.csv في المستوى الرئيسي للمجلد.</div>
+            </div>
+            <div class="batch-note"><strong>ماذا سيحدث؟</strong><span>سيتم المرور على الإدارات في names.json، ثم تصنيف الإدارات التي لا تملك ملفات، والأزواج الناقصة، وملفات CSV غير المسجلة.</span></div>
+        }
+
+        <div class="divider-line"></div>
+        <div class="panel-header compact">
+            <div><span class="panel-step">الخطوة 2</span><h2>مكان حفظ النتائج</h2><p>كل إدارة ستحصل على مجلد يحتوي على ملفات XML الأربعة.</p></div>
+        </div>
+        <div class="field-group">
+            <label>مجلد النتائج <span class="required-mark">*</span></label>
+            <div class="path-picker"><input class="text-input path-input" readonly value="@OutputFolder" placeholder="اختر مجلد حفظ النتائج" /><button class="btn btn-outline" @onclick="PickOutputFolder">اختيار مجلد</button></div>
+        </div>
+
+        <div class="options-box">
+            <div class="options-title">خيارات الإصدار الثاني</div>
+            <label class="check-row">
+                <input type="checkbox" @bind="UseArabicFolderName" />
+                <span><strong>استخدام الاسم العربي كمجلد للنتيجة</strong><small>يبقى اسم المشروع داخل Project.xml هو الـ Franko slug. عند إلغاء الاختيار يُستخدم اسم V1 للمجلد.</small></span>
+            </label>
+            <div class="field-group timestamp-field">
+                <label>Timestamp مخصص <span class="optional-mark">اختياري</span></label>
+                <input class="text-input" @bind="TimestampOverride" placeholder="MM/dd/yyyy hh:mm:ss AM/PM — اتركه فارغاً لاستخدام الوقت الحالي" dir="ltr" />
+                <div class="field-hint">مفيد لإعادة تشغيل اختبارات Golden بنفس وقت V1.</div>
+            </div>
+        </div>
+
+        <div class="form-actions">
+            <button class="btn btn-primary run-button" disabled="@IsRunning" @onclick="RunConversion">
+                @if (IsRunning) { <span class="spinner"></span><span>جارٍ التحويل...</span> }
+                else { <span>▶</span><span>بدء التحويل</span> }
+            </button>
+            <button class="btn btn-ghost" disabled="@IsRunning" @onclick="Reset">إعادة تعيين</button>
+        </div>
+        @if (!string.IsNullOrWhiteSpace(ErrorMessage))
+        {
+            <div class="alert alert-error"><strong>تعذر إكمال العملية</strong><div>@ErrorMessage</div></div>
+        }
+    </div>
+
+    <aside class="panel side-panel">
+        <div class="side-panel-top"><div class="side-illustration">XML</div><h3>مواصفات التصدير</h3><p>الحفاظ على بنية الحزمة التي يستوردها النظام الحالي.</p></div>
+        <div class="spec-list">
+            <div><span class="spec-check">✓</span><span>UTF-8 بدون BOM</span></div>
+            <div><span class="spec-check">✓</span><span>CRLF و TAB indentation</span></div>
+            <div><span class="spec-check">✓</span><span>ترتيب صفوف CSV كما هو</span></div>
+            <div><span class="spec-check">✓</span><span>الحفاظ على المسافات و TAB داخل القيم</span></div>
+            <div><span class="spec-check">✓</span><span>فحص الأعمدة وأنواع الحقول</span></div>
+            <div><span class="spec-check">✓</span><span>كتابة مرحلية لمنع النتائج الجزئية</span></div>
+        </div>
+        <div class="side-tip"><strong>تذكير</strong><p>المسار الافتراضي متوافق مع V1. الخصائص الجديدة لا تُفعّل إلا عند اختيارها.</p></div>
+    </aside>
+</div>
+
+@if (SingleResult is not null)
+{
+    <div class="result-section">
+        <div class="report-path">تقرير العملية: <span class="mono">@ReportPath</span></div>
+        <div class="result-banner success"><div class="result-banner-icon">✓</div><div><strong>تم تحويل الإدارة بنجاح</strong><p>@SingleResult.DisplayName · @SingleResult.RowCount.ToString("N0", CultureInfo.InvariantCulture) صف · @SingleResult.FilmCount فيلم</p></div></div>
+        <ResultFiles Files="SingleResult.Files" OutputDirectory="SingleResult.OutputDirectory" />
+    </div>
+}
+
+@if (BatchResult is not null)
+{
+    <div class="result-section">
+        <div class="report-path">تقرير العملية: <span class="mono">@ReportPath</span></div>
+        <div class="section-heading"><div><h2>ملخص المعالجة الجماعية</h2><p>تمت معالجة كل إدارة بصورة مستقلة؛ فشل إدارة لا يمنع عرض نتائج بقية الإدارات.</p></div></div>
+        <div class="summary-cards">
+            <div class="summary-tile"><strong>@BatchResult.ConvertedCount</strong><span>تم تحويلها</span></div>
+            <div class="summary-tile"><strong>@BatchResult.FailedCount</strong><span>فشل التحويل</span></div>
+            <div class="summary-tile"><strong>@BatchResult.IncompleteCount</strong><span>ملفات غير مكتملة</span></div>
+            <div class="summary-tile"><strong>@BatchResult.MissingCount</strong><span>بدون CSV</span></div>
+        </div>
+        <div class="panel result-table-panel">
+            <div class="table-scroll"><table class="data-table"><thead><tr><th>الإدارة</th><th>الحالة</th><th>الصفوف</th><th>الأفلام</th><th>النتيجة / التفاصيل</th></tr></thead><tbody>
+                @foreach (var item in BatchResult.Departments)
+                {
+                    <tr>
+                        <td><strong>@item.DisplayName</strong><small class="table-sub mono">@item.Slug</small></td>
+                        <td><span class="state-tag @StatusClass(item.Status)">@StatusLabel(item.Status)</span></td>
+                        <td>@(item.Result?.RowCount.ToString("N0", CultureInfo.InvariantCulture) ?? "—")</td>
+                        <td>@(item.Result?.FilmCount.ToString(CultureInfo.InvariantCulture) ?? "—")</td>
+                        <td class="message-cell">@(item.Message ?? item.Result?.OutputDirectory ?? "—")</td>
+                    </tr>
+                }
+            </tbody></table></div>
+        </div>
+        @if (BatchResult.OrphanCsvFiles.Count > 0)
+        {
+            <div class="notice-card warning"><div class="notice-icon">!</div><div><strong>ملفات CSV غير مرتبطة بسجل الإدارات (@BatchResult.OrphanCsvFiles.Count)</strong><p>@foreach (var path in BatchResult.OrphanCsvFiles) { <span class="orphan-path">@Path.GetFileName(path)</span> }</p></div></div>
+        }
+        @foreach (var item in BatchResult.Departments.Where(x => x.Result is not null))
+        {
+            <details class="department-details"><summary>@item.DisplayName — تفاصيل الملفات والـ SHA-256</summary><ResultFiles Files="item.Result!.Files" OutputDirectory="item.Result!.OutputDirectory" /></details>
+        }
+    </div>
+}
+
+@code {
+    private string Mode { get; set; } = "single";
+    private string NamesPath { get; set; } = string.Empty;
+    private string FieldsCsvPath { get; set; } = string.Empty;
+    private string DataCsvPath { get; set; } = string.Empty;
+    private string InputFolder { get; set; } = string.Empty;
+    private string OutputFolder { get; set; } = string.Empty;
+    private string TimestampOverride { get; set; } = string.Empty;
+    private bool UseArabicFolderName { get; set; }
+    private bool IsRunning { get; set; }
+    private string ErrorMessage { get; set; } = string.Empty;
+    private string ReportPath { get; set; } = string.Empty;
+    private DepartmentEntry? MatchedDepartment { get; set; }
+    private DepartmentConversionResult? SingleResult { get; set; }
+    private BatchConversionSummary? BatchResult { get; set; }
+
+    protected override void OnInitialized()
+    {
+        NamesPath = Workspace.NamesFilePath;
+        OutputFolder = Workspace.OutputFolderPath;
+    }
+
+    private async Task PickNames()
+    {
+        var path = await Picker.PickFileAsync("اختر ملف names.json", ".json");
+        if (path is null) return;
+        NamesPath = path;
+        Workspace.SetNamesFilePath(path);
+        await RefreshMatch();
+    }
+
+    private async Task PickFields()
+    {
+        FieldsCsvPath = await Picker.PickFileAsync("اختر ملف الحقول", ".csv") ?? FieldsCsvPath;
+        await RefreshMatch();
+    }
+
+    private async Task PickData()
+    {
+        DataCsvPath = await Picker.PickFileAsync("اختر ملف البيانات", ".csv") ?? DataCsvPath;
+        await RefreshMatch();
+    }
+
+    private async Task RefreshMatch()
+    {
+        MatchedDepartment = null;
+        if (string.IsNullOrWhiteSpace(NamesPath) || !File.Exists(NamesPath) ||
+            string.IsNullOrWhiteSpace(FieldsCsvPath) || string.IsNullOrWhiteSpace(DataCsvPath)) return;
+        try
+        {
+            var names = await NamesRegistry.LoadAsync(NamesPath);
+            MatchedDepartment = SingleProjectResolver.Resolve(FieldsCsvPath, DataCsvPath, names).Department;
+        }
+        catch (Exception ex) { ErrorMessage = ex.Message; }
+    }
+
+    private async Task PickInputFolder()
+    {
+        InputFolder = await Picker.PickFolderAsync("اختر مجلد ملفات CSV") ?? InputFolder;
+    }
+
+    private async Task PickOutputFolder()
+    {
+        var path = await Picker.PickFolderAsync("اختر مجلد النتائج");
+        if (path is null) return;
+        OutputFolder = path;
+        Workspace.SetOutputFolderPath(path);
+    }
+
+    private async Task RunConversion()
+    {
+        ErrorMessage = string.Empty;
+        SingleResult = null;
+        BatchResult = null;
+        ReportPath = string.Empty;
+        IsRunning = true;
+        try
+        {
+            if (string.IsNullOrWhiteSpace(NamesPath)) throw new InvalidOperationException("حدد ملف names.json أولاً.");
+            if (string.IsNullOrWhiteSpace(OutputFolder)) throw new InvalidOperationException("حدد مجلد النتائج أولاً.");
+            var names = await NamesRegistry.LoadAsync(NamesPath);
+            var settings = await SettingsStore.LoadAsync(Workspace.SettingsFilePath);
+            var folderMode = UseArabicFolderName ? OutputFolderNameMode.ArabicDisplayName : OutputFolderNameMode.LegacySlug;
+
+            if (Mode == "single")
+            {
+                var resolved = SingleProjectResolver.Resolve(FieldsCsvPath, DataCsvPath, names);
+                SingleResult = await Task.Run(() => Converter.Convert(new ConversionRequest(
+                    resolved.FieldsCsvPath, resolved.DataCsvPath, OutputFolder, resolved.Department,
+                    folderMode, NullIfEmpty(TimestampOverride)), settings));
+                ReportPath = ReportWriter.SaveSingle(OutputFolder, SingleResult, resolved.FieldsCsvPath, resolved.DataCsvPath);
+            }
+            else
+            {
+                if (string.IsNullOrWhiteSpace(InputFolder)) throw new InvalidOperationException("حدد مجلد ملفات CSV أولاً.");
+                BatchResult = await Task.Run(() => BatchConverter.ConvertFolder(InputFolder, OutputFolder,
+                    names, settings, folderMode, NullIfEmpty(TimestampOverride)));
+                ReportPath = ReportWriter.SaveBatch(OutputFolder, BatchResult);
+            }
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = ex is ConversionException conversion ? conversion.ToString() : ex.Message;
+        }
+        finally { IsRunning = false; }
+    }
+
+    private void SetSingleMode() => Mode = "single";
+    private void SetBatchMode() => Mode = "batch";
+
+    private void Reset()
+    {
+        FieldsCsvPath = string.Empty;
+        DataCsvPath = string.Empty;
+        InputFolder = string.Empty;
+        TimestampOverride = string.Empty;
+        MatchedDepartment = null;
+        SingleResult = null;
+        BatchResult = null;
+        ReportPath = string.Empty;
+        ErrorMessage = string.Empty;
+    }
+
+    private static string? NullIfEmpty(string value) => string.IsNullOrWhiteSpace(value) ? null : value;
+    private static string StatusClass(DepartmentBatchStatus status) => status switch
+    {
+        DepartmentBatchStatus.Converted => "state-success",
+        DepartmentBatchStatus.Failed => "state-danger",
+        DepartmentBatchStatus.IncompleteInput => "state-warning",
+        DepartmentBatchStatus.MissingInput => "state-muted",
+        _ => "state-muted"
+    };
+    private static string StatusLabel(DepartmentBatchStatus status) => status switch
+    {
+        DepartmentBatchStatus.Converted => "تم التحويل",
+        DepartmentBatchStatus.Failed => "فشل",
+        DepartmentBatchStatus.IncompleteInput => "زوج ناقص",
+        DepartmentBatchStatus.MissingInput => "لا توجد ملفات",
+        _ => "تم التخطي"
+    };
+}
