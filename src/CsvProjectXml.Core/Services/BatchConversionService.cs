@@ -101,10 +101,24 @@ public sealed class BatchConversionService(CsvProjectConverter converter)
 
             try
             {
-                var converted = converter.Convert(new ConversionRequest(pair.FieldsPath, pair.DataPath,
-                    outputRoot, department, folderNameMode, timestampOverride), settings);
+                var request = new ConversionRequest(pair.FieldsPath, pair.DataPath,
+                    outputRoot, department, folderNameMode, timestampOverride);
+                var preflight = converter.Validate(request, settings);
+                if (preflight.HasConflicts)
+                {
+                    results.Add(new DepartmentBatchItem(department.Value, department.DisplayName,
+                        DepartmentBatchStatus.Failed,
+                        Message: $"{preflight.Conflicts.Count} data row(s) need manual correction.",
+                        Conflicts: preflight.Conflicts,
+                        FieldsCsvPath: pair.FieldsPath,
+                        DataCsvPath: pair.DataPath));
+                    continue;
+                }
+
+                var converted = converter.Convert(request, settings);
                 results.Add(new DepartmentBatchItem(department.Value, department.DisplayName,
-                    DepartmentBatchStatus.Converted, converted));
+                    DepartmentBatchStatus.Converted, converted,
+                    FieldsCsvPath: pair.FieldsPath, DataCsvPath: pair.DataPath));
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {

@@ -28,12 +28,31 @@ public enum DepartmentBatchStatus
     Skipped
 }
 
+public sealed record RowValidationIssue(string Code, string Message, string? ColumnName);
+
+/// <summary>A data record that needs user attention. RecordNumber is 1-based, excluding the CSV header.</summary>
+public sealed record DataRowConflict(
+    long RecordNumber,
+    int StartLine,
+    IReadOnlyList<string> Cells,
+    IReadOnlyList<RowValidationIssue> Issues);
+
+public sealed record ConversionPreflightResult(IReadOnlyList<DataRowConflict> Conflicts)
+{
+    public bool HasConflicts => Conflicts.Count > 0;
+    public bool IsValid => Conflicts.Count == 0;
+}
+
 public sealed record DepartmentBatchItem(
     string Slug,
     string DisplayName,
     DepartmentBatchStatus Status,
     DepartmentConversionResult? Result = null,
-    string? Message = null);
+    string? Message = null,
+    IReadOnlyList<DataRowConflict>? Conflicts = null,
+    string? FieldsCsvPath = null,
+    string? DataCsvPath = null,
+    Guid? RepairSessionId = null);
 
 public sealed record BatchConversionSummary(
     IReadOnlyList<DepartmentBatchItem> Departments,

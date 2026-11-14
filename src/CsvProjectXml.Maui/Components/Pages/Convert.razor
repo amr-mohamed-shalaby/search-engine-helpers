@@ -6,6 +6,9 @@
 @inject CsvProjectConverter Converter
 @inject BatchConversionService BatchConverter
 @inject ConversionReportWriter ReportWriter
+@inject RepairSessionStore RepairSessions
+@inject ConversionPageState ConversionPage
+@inject NavigationManager Navigation
 
 <PageTitle>تحويل الملفات · CSV to Project XML</PageTitle>
 
@@ -101,6 +104,13 @@
         {
             <div class="alert alert-error"><strong>تعذر إكمال العملية</strong><div>@ErrorMessage</div></div>
         }
+        @if (PendingRepairSessionId is not null)
+        {
+            <div class="repair-entry-card">
+                <div><strong>يمكن إصلاح تعارضات الصفوف يدوياً</strong><span>تم جمع كل الصفوف التي تحتاج إلى مراجعة. الملف الأصلي لن يتغير.</span></div>
+                <button class="btn btn-primary" @onclick="OpenSingleRepair">إصلاح التعارضات يدوياً</button>
+            </div>
+        }
     </div>
 
     <aside class="panel side-panel">
@@ -138,7 +148,7 @@
             <div class="summary-tile"><strong>@BatchResult.MissingCount</strong><span>بدون CSV</span></div>
         </div>
         <div class="panel result-table-panel">
-            <div class="table-scroll"><table class="data-table"><thead><tr><th>الإدارة</th><th>الحالة</th><th>الصفوف</th><th>الأفلام</th><th>النتيجة / التفاصيل</th></tr></thead><tbody>
+            <div class="table-scroll"><table class="data-table"><thead><tr><th>الإدارة</th><th>الحالة</th><th>الصفوف</th><th>الأفلام</th><th>النتيجة / التفاصيل</th><th>الإجراء</th></tr></thead><tbody>
                 @foreach (var item in BatchResult.Departments)
                 {
                     <tr>
@@ -147,6 +157,12 @@
                         <td>@(item.Result?.RowCount.ToString("N0", CultureInfo.InvariantCulture) ?? "—")</td>
                         <td>@(item.Result?.FilmCount.ToString(CultureInfo.InvariantCulture) ?? "—")</td>
                         <td class="message-cell">@(item.Message ?? item.Result?.OutputDirectory ?? "—")</td>
+                        <td>
+                            @if (item.RepairSessionId is Guid repairId)
+                            {
+                                <button class="btn btn-small btn-primary" @onclick="() => OpenRepair(repairId)">إصلاح التعارضات</button>
+                            }
+                        </td>
                     </tr>
                 }
             </tbody></table></div>
@@ -177,11 +193,32 @@
     private DepartmentEntry? MatchedDepartment { get; set; }
     private DepartmentConversionResult? SingleResult { get; set; }
     private BatchConversionSummary? BatchResult { get; set; }
+    private Guid? PendingRepairSessionId { get; set; }
 
     protected override void OnInitialized()
     {
-        NamesPath = Workspace.NamesFilePath;
-        OutputFolder = Workspace.OutputFolderPath;
+        if (ConversionPage.Current is { } saved)
+        {
+            Mode = saved.Mode;
+            NamesPath = saved.NamesPath;
+            FieldsCsvPath = saved.FieldsCsvPath;
+            DataCsvPath = saved.DataCsvPath;
+            InputFolder = saved.InputFolder;
+            OutputFolder = saved.OutputFolder;
+            TimestampOverride = saved.TimestampOverride;
+            UseArabicFolderName = saved.UseArabicFolderName;
+            ErrorMessage = saved.ErrorMessage;
+            ReportPath = saved.ReportPath;
+            MatchedDepartment = saved.MatchedDepartment;
+            SingleResult = saved.SingleResult;
+            BatchResult = saved.BatchResult;
+            PendingRepairSessionId = saved.PendingRepairSessionId;
+        }
+
+        if (string.IsNullOrWhiteSpace(NamesPath))
+            NamesPath = Workspace.NamesFilePath;
+        if (string.IsNullOrWhiteSpace(OutputFolder))
+            OutputFolder = Workspace.OutputFolderPath;
     }
 
     private async Task PickNames()
@@ -236,6 +273,7 @@
         ErrorMessage = string.Empty;
         SingleResult = null;
         BatchResult = null;
+        PendingRepairSessionId = null;
         ReportPath = string.Empty;
         IsRunning = true;
         try
@@ -249,9 +287,19 @@
             if (Mode == "single")
             {
                 var resolved = SingleProjectResolver.Resolve(FieldsCsvPath, DataCsvPath, names);
-                SingleResult = await Task.Run(() => Converter.Convert(new ConversionRequest(
-                    resolved.FieldsCsvPath, resolved.DataCsvPath, OutputFolder, resolved.Department,
-                    folderMode, NullIfEmpty(TimestampOverride)), settings));
+                var request = new ConversionRequest(resolved.FieldsCsvPath, resolved.DataCsvPath,
+                    OutputFolder, resolved.Department, folderMode, NullIfEmpty(TimestampOverride));
+                var preflight = await Task.Run(() => Converter.Validate(request, settings));
+                if (preflight.HasConflicts)
+                {
+                    var session = CreateRepairSession(request, settings, preflight.Conflicts);
+                    RepairSessions.Add(session);
+                    PendingRepairSessionId = session.Id;
+                    ErrorMessage = $"تعذر التحويل: تم العثور على {preflight.Conflicts.Count} صف يحتاج إلى تصحيح يدوي.";
+                    return;
+                }
+
+                SingleResult = await Task.Run(() => Converter.Convert(request, settings));
                 ReportPath = ReportWriter.SaveSingle(OutputFolder, SingleResult, resolved.FieldsCsvPath, resolved.DataCsvPath);
             }
             else
@@ -259,6 +307,22 @@
                 if (string.IsNullOrWhiteSpace(InputFolder)) throw new InvalidOperationException("حدد مجلد ملفات CSV أولاً.");
                 BatchResult = await Task.Run(() => BatchConverter.ConvertFolder(InputFolder, OutputFolder,
                     names, settings, folderMode, NullIfEmpty(TimestampOverride)));
+
+                var updatedDepartments = BatchResult.Departments.Select(item =>
+                {
+                    var conflicts = item.Conflicts;
+                    if (conflicts is null || conflicts.Count == 0 ||
+                        item.FieldsCsvPath is null || item.DataCsvPath is null)
+                        return item;
+
+                    var request = new ConversionRequest(item.FieldsCsvPath, item.DataCsvPath,
+                        OutputFolder, names.First(x => string.Equals(x.Value, item.Slug, StringComparison.OrdinalIgnoreCase)),
+                        folderMode, NullIfEmpty(TimestampOverride));
+                    var session = CreateRepairSession(request, settings, conflicts);
+                    RepairSessions.Add(session);
+                    return item with { RepairSessionId = session.Id };
+                }).ToArray();
+                BatchResult = BatchResult with { Departments = updatedDepartments };
                 ReportPath = ReportWriter.SaveBatch(OutputFolder, BatchResult);
             }
         }
@@ -266,7 +330,11 @@
         {
             ErrorMessage = ex is ConversionException conversion ? conversion.ToString() : ex.Message;
         }
-        finally { IsRunning = false; }
+        finally
+        {
+            IsRunning = false;
+            SavePageState();
+        }
     }
 
     private void SetSingleMode() => Mode = "single";
@@ -274,6 +342,7 @@
 
     private void Reset()
     {
+        ConversionPage.Clear();
         FieldsCsvPath = string.Empty;
         DataCsvPath = string.Empty;
         InputFolder = string.Empty;
@@ -281,8 +350,48 @@
         MatchedDepartment = null;
         SingleResult = null;
         BatchResult = null;
+        PendingRepairSessionId = null;
         ReportPath = string.Empty;
         ErrorMessage = string.Empty;
+    }
+
+    private PendingRepairSession CreateRepairSession(ConversionRequest request, ConversionSettings settings,
+        IReadOnlyList<DataRowConflict> conflicts)
+    {
+        using var enumerator = CsvReader.Read(request.DataCsvPath).GetEnumerator();
+        var headers = enumerator.MoveNext() ? enumerator.Current.Values.ToArray() : [];
+        return new PendingRepairSession(Guid.NewGuid(), request, request.DataCsvPath,
+            settings, headers, conflicts, 0);
+    }
+
+    private void OpenSingleRepair()
+    {
+        if (PendingRepairSessionId is Guid id) OpenRepair(id);
+    }
+
+    private void OpenRepair(Guid id)
+    {
+        SavePageState();
+        Navigation.NavigateTo($"/repair/{id}");
+    }
+
+    private void SavePageState()
+    {
+        ConversionPage.Save(new ConversionPageSnapshot(
+            Mode,
+            NamesPath,
+            FieldsCsvPath,
+            DataCsvPath,
+            InputFolder,
+            OutputFolder,
+            TimestampOverride,
+            UseArabicFolderName,
+            ErrorMessage,
+            ReportPath,
+            MatchedDepartment,
+            SingleResult,
+            BatchResult,
+            PendingRepairSessionId));
     }
 
     private static string? NullIfEmpty(string value) => string.IsNullOrWhiteSpace(value) ? null : value;
