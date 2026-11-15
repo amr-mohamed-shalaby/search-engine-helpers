@@ -9,6 +9,7 @@
 @inject RepairSessionStore RepairSessions
 @inject ConversionPageState ConversionPage
 @inject NavigationManager Navigation
+@inject IJSRuntime JS
 
 <PageTitle>تحويل الملفات · CSV to Project XML</PageTitle>
 
@@ -129,7 +130,7 @@
 
 @if (SingleResult is not null)
 {
-    <div class="result-section">
+    <div class="result-section" id="conversion-results">
         <div class="report-path">تقرير العملية: <span class="mono">@ReportPath</span></div>
         <div class="result-banner success"><div class="result-banner-icon">✓</div><div><strong>تم تحويل الإدارة بنجاح</strong><p>@SingleResult.DisplayName · @SingleResult.RowCount.ToString("N0", CultureInfo.InvariantCulture) صف · @SingleResult.FilmCount فيلم</p></div></div>
         <ResultFiles Files="SingleResult.Files" OutputDirectory="SingleResult.OutputDirectory" />
@@ -138,7 +139,7 @@
 
 @if (BatchResult is not null)
 {
-    <div class="result-section">
+    <div class="result-section" id="conversion-results">
         <div class="report-path">تقرير العملية: <span class="mono">@ReportPath</span></div>
         <div class="section-heading"><div><h2>ملخص المعالجة الجماعية</h2><p>تمت معالجة كل إدارة بصورة مستقلة؛ فشل إدارة لا يمنع عرض نتائج بقية الإدارات.</p></div></div>
         <div class="summary-cards">
@@ -179,6 +180,8 @@
 }
 
 @code {
+    private bool _scrollResultsIntoView;
+
     private string Mode { get; set; } = "single";
     private string NamesPath { get; set; } = string.Empty;
     private string FieldsCsvPath { get; set; } = string.Empty;
@@ -334,6 +337,16 @@
         {
             IsRunning = false;
             SavePageState();
+            _scrollResultsIntoView = SingleResult is not null || BatchResult is not null;
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_scrollResultsIntoView)
+        {
+            _scrollResultsIntoView = false;
+            await JS.InvokeVoidAsync("csvProjectUi.scrollToElement", "conversion-results");
         }
     }
 

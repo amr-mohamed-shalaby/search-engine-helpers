@@ -15,6 +15,29 @@
         حدث خطأ غير متوقع. <a href="" class="reload">إعادة التحميل</a>
         <a class="dismiss">×</a>
     </div>
+    <script>
+        window.csvProjectUi = {
+            initialize: function () {
+                const button = document.querySelector('.scroll-top-button');
+                if (!button || button.dataset.initialized === 'true') return;
+                button.dataset.initialized = 'true';
+
+                const updateButton = function () {
+                    button.classList.toggle('is-visible', window.scrollY > 320);
+                };
+
+                window.addEventListener('scroll', updateButton, { passive: true });
+                updateButton();
+            },
+            scrollToTop: function () {
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            },
+            scrollToElement: function (id) {
+                const element = document.getElementById(id);
+                if (element) element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+        };
+    </script>
     <script src="_framework/blazor.webview.js" autostart="false"></script>
 </body>
 </html>

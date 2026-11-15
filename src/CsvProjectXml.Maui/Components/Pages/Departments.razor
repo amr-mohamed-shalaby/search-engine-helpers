@@ -19,7 +19,7 @@
 </div>
 
 <div class="registry-layout">
-    <section class="panel registry-list-panel">
+    <section class="panel registry-list-panel" id="registry-table-top">
         <div class="panel-header"><div><span class="panel-step">REGISTRY</span><h2>الإدارات المسجلة</h2><p>القائمة مرتبة حسب قيمة index المخزنة.</p></div><span class="count-chip small-count">@CustomDepartments.Count</span></div>
         @if (CustomDepartments.Count == 0)
         {
@@ -64,6 +64,7 @@
 </div>
 
 @code {
+    private bool _scrollRegistryIntoView;
     private string NamesPath { get; set; } = string.Empty;
     private List<DepartmentEntry> CustomDepartments { get; set; } = [];
     private string NewText { get; set; } = string.Empty;
@@ -78,6 +79,15 @@
     {
         NamesPath = Workspace.NamesFilePath;
         await Load();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_scrollRegistryIntoView)
+        {
+            _scrollRegistryIntoView = false;
+            await JS.InvokeVoidAsync("csvProjectUi.scrollToElement", "registry-table-top");
+        }
     }
 
     private async Task PickNames()
@@ -97,8 +107,16 @@
             CustomDepartments = [];
             return;
         }
-        try { CustomDepartments = (await Registry.LoadAsync(NamesPath)).ToList(); }
-        catch (Exception ex) { Error = ex.Message; }
+        try
+        {
+            CustomDepartments = (await Registry.LoadAsync(NamesPath)).ToList();
+            _scrollRegistryIntoView = CustomDepartments.Count > 0;
+        }
+        catch (Exception ex)
+        {
+            Error = ex.Message;
+            _scrollRegistryIntoView = false;
+        }
     }
 
     private async Task AddDepartment()
