@@ -1,9 +1,10 @@
 using DepartmentManagement.Contracts;
+using DepartmentManagement.Infrastructure.DependencyInjection;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// SQL Server, ASP.NET Core Identity, authentication, and authorization are introduced
-// in the next implementation phases. Keep this first API host intentionally minimal.
+builder.Services.AddInfrastructure(builder.Configuration);
+
 var app = builder.Build();
 
 app.MapGet("/health", () => Results.Ok(new HealthResponse("Healthy")))
