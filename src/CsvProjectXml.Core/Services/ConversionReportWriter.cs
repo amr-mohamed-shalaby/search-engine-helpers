@@ -40,7 +40,17 @@ public sealed class ConversionReportWriter
                 result.MissingCount,
                 OrphanCsvCount = result.OrphanCsvFiles.Count
             },
-            Departments = result.Departments,
+            // Keep the report compact: row contents belong in the repair workspace, not the summary report.
+            Departments = result.Departments.Select(item => new
+            {
+                item.Slug,
+                item.DisplayName,
+                item.Status,
+                item.Result,
+                item.Message,
+                ConflictCount = item.Conflicts?.Count ?? 0,
+                RepairAvailable = item.RepairSessionId is not null
+            }),
             OrphanCsvFiles = result.OrphanCsvFiles
         };
         return Save(outputRoot, report);

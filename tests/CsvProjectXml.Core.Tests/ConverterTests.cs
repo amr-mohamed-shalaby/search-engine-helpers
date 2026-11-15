@@ -38,7 +38,7 @@ public sealed class ConverterTests : IDisposable
     {
         var input = CreateInput(
             "ID,FieldName,FieldNameAr,FieldType,FieldSize,NotNull,ListValues\r\n1,company,الشركة,NVARCHAR,100,True,\r\n",
-            "ID,FilmId,FilmType,PortfolioId,company\r\n1,2,35,1,A&B <C> \"IDG\" 'مصر'\r\n");
+            "ID,FilmId,FilmType,PortfolioId,company\r\n1,2,35,1,\"A&B <C> \"\"IDG\"\" 'مصر'\"\r\n");
 
         var result = Convert(input);
         var xml = File.ReadAllText(Path.Combine(result.OutputDirectory, "Project_Data.xml"), Encoding.UTF8);

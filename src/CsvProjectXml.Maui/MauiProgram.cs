@@ -26,6 +26,9 @@ public static class MauiProgram
         builder.Services.AddSingleton<NamesRegistryService>();
         builder.Services.AddSingleton<ConversionSettingsStore>();
         builder.Services.AddSingleton<ConversionReportWriter>();
+        builder.Services.AddSingleton<CsvRepairService>();
+        builder.Services.AddSingleton<RepairSessionStore>();
+        builder.Services.AddSingleton<ConversionPageState>();
         builder.Services.AddSingleton<WorkspaceState>();
         builder.Services.AddSingleton<IPathPicker, WindowsPathPicker>();
         return builder.Build();

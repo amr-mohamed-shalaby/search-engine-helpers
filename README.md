@@ -261,3 +261,17 @@ The following choices are implementation defaults, not facts established by the 
 14. **Golden test:** real original XML files and their per-department timestamps must be supplied to prove byte identity against the real V1 package.
 
 The observed index 13 and index 56 slug anomalies are preserved when those entries are loaded. New entries use the transliteration routine; the two existing exceptions are not repaired automatically.
+
+## Manual conflict resolution
+
+When a data CSV contains row-level validation problems, conversion now performs a preflight scan and collects the affected rows instead of stopping on the first row. In single-project mode, use **إصلاح التعارضات يدوياً** to open the repair page. In bulk mode, each department with repairable row conflicts gets its own **إصلاح التعارضات** action.
+
+The repair page allows changing cell values, merging adjacent cells (useful when an unquoted comma split one Arabic value into two cells), removing a cell, or adding a blank cell. Submitting writes a new UTF-8-with-BOM CSV copy under:
+
+```text
+<output-folder>\_repaired-inputs\<department-slug>\<repair-session-id>\data-revision-N.csv
+```
+
+The original CSV is opened read-only and is never overwritten. The repaired copy is revalidated; remaining conflicts are shown again. XML conversion starts only after the repaired copy passes validation.
+
+Repair sessions are held in memory for the current app process. Keep the app open while resolving a session; closing/restarting the application clears its pending UI session, but leaves both the original CSV and any saved repair-copy files untouched.

@@ -22,6 +22,106 @@ public sealed class CsvProjectConverter
         ["Project.xml", "Project_Fields.xml", "Project_Data.xml", "Project_lookup_Fields.xml"];
     private static readonly Regex XmlTagName = new("^[A-Za-z_][A-Za-z0-9_.-]*$", RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
+    /// <summary>
+    /// Validates the complete data CSV and returns all row-level conflicts without writing XML.
+    /// Structural errors in the fields CSV or data header still fail immediately because the
+    /// application cannot reliably identify the data columns in those cases.
+    /// </summary>
+    public ConversionPreflightResult Validate(ConversionRequest request, ConversionSettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(settings);
+        ValidateRequest(request, settings);
+        ValidateEnabledFeatures(settings);
+
+        var fields = ReadFields(request.FieldsCsvPath, settings);
+        var expected = DataFixedHeader.Concat(fields.Select(x => x.FieldName)).ToArray();
+        using var enumerator = ReadCsvRecords(request.DataCsvPath).GetEnumerator();
+        if (!enumerator.MoveNext())
+            throw new ConversionException("The data CSV is empty.", request.DataCsvPath, 1, "Header");
+        ValidateExactHeader(enumerator.Current, expected, request.DataCsvPath, "Data CSV");
+
+        var conflicts = new List<DataRowConflict>();
+        var portfolios = new HashSet<(long FilmId, long PortfolioId)>();
+        long recordNumber = 0;
+
+        while (enumerator.MoveNext())
+        {
+            var row = enumerator.Current;
+            recordNumber++;
+            var issues = new List<RowValidationIssue>();
+            void Add(string code, string message, string? column) => issues.Add(new RowValidationIssue(code, message, column));
+
+            if (row.Values.Count != expected.Length)
+            {
+                var column = row.Values.Count > expected.Length
+                    ? $"#{expected.Length + 1} (unexpected extra column)"
+                    : expected[row.Values.Count];
+                Add("COLUMN_COUNT",
+                    $"Row has {row.Values.Count} columns; expected {expected.Length}.", column);
+            }
+            else
+            {
+                var values = row.Values;
+                long? filmId = TryParseNonNegative(values[1], out var parsedFilmId) ? parsedFilmId : null;
+                long? filmType = TryParseNonNegative(values[2], out var parsedFilmType) ? parsedFilmType : null;
+                long? portfolioId = TryParseNonNegative(values[3], out var parsedPortfolioId) ? parsedPortfolioId : null;
+
+                if (filmId is null) Add("INVALID_FILM_ID", $"'{values[1]}' is not a non-negative integer.", "FilmId");
+                if (filmType is null) Add("INVALID_FILM_TYPE", $"'{values[2]}' is not a non-negative integer.", "FilmType");
+                if (portfolioId is null) Add("INVALID_PORTFOLIO_ID", $"'{values[3]}' is not a non-negative integer.", "PortfolioId");
+
+                if (filmId is not null && portfolioId is not null && !portfolios.Add((filmId.Value, portfolioId.Value)))
+                    Add("DUPLICATE_FILM_PORTFOLIO",
+                        $"Duplicate (FilmId, PortfolioId) pair ({values[1]}, {values[3]}).", "FilmId/PortfolioId");
+
+                ValidateXmlValue(values[1], "FilmId", Add);
+                ValidateXmlValue(values[2], "FilmType", Add);
+                ValidateXmlValue($"\\Scan_Tree\\{values[2]}\\{values[1]}\\Film\\{values[3]}", "PHOTO_PATH", Add);
+
+                for (var index = 0; index < fields.Count; index++)
+                {
+                    var field = fields[index];
+                    var value = values[index + DataFixedHeader.Length];
+                    var context = new DataRowContext(values[0], filmId ?? 0, filmType ?? 0,
+                        portfolioId ?? 0, request.DataCsvPath, row.StartLine);
+                    try
+                    {
+                        foreach (var feature in _features)
+                        {
+                            if ((settings.EnabledFeatureIds ?? []).Contains(feature.Id, StringComparer.OrdinalIgnoreCase))
+                                value = feature.Transform(value, field, context);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Add("TRANSFORM_FAILED", ex.Message, field.FieldName);
+                    }
+
+                    if (settings.ValidateFieldSize && value.Length > field.FieldSize)
+                        Add("FIELD_SIZE", $"Value length {value.Length} exceeds FieldSize {field.FieldSize}.", field.FieldName);
+                    if (settings.ValidateNotNull && field.NotNull && value.Length == 0)
+                        Add("REQUIRED_VALUE", "The field is marked NotNull but the value is empty.", field.FieldName);
+                    ValidateXmlValue(value, field.FieldName, Add);
+                }
+            }
+
+            if (issues.Count > 0)
+                conflicts.Add(new DataRowConflict(recordNumber, row.StartLine, row.Values.ToArray(), issues));
+        }
+
+        return new ConversionPreflightResult(conflicts);
+    }
+
+    private static bool TryParseNonNegative(string value, out long result) =>
+        long.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out result) && result >= 0;
+
+    private static void ValidateXmlValue(string value, string column, Action<string, string, string?> add)
+    {
+        try { XmlText.ValidateXml10(value, "", 0, column); }
+        catch (ConversionException ex) { add("INVALID_XML_CHARACTER", ex.Message, column); }
+    }
+
     public DepartmentConversionResult Convert(ConversionRequest request, ConversionSettings settings)
     {
         ArgumentNullException.ThrowIfNull(request);
