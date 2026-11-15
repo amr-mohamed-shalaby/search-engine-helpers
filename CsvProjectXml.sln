@@ -1,4 +1,4 @@
-Microsoft Visual Studio Solution File, Format Version 12.00
+﻿Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 18
 VisualStudioVersion = 18.0.0.0
 MinimumVisualStudioVersion = 10.0.40219.1
@@ -8,6 +8,17 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CsvProjectXml.Maui", "src\C
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CsvProjectXml.Core.Tests", "tests\CsvProjectXml.Core.Tests\CsvProjectXml.Core.Tests.csproj", "{42FD7AC5-F4B3-47D2-9BD9-D5F3E5F45F47}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DepartmentManagement.Domain", "src\DepartmentManagement.Domain\DepartmentManagement.Domain.csproj", "{2434A644-850C-463B-98C1-A4B8B0FBDFB0}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DepartmentManagement.Application", "src\DepartmentManagement.Application\DepartmentManagement.Application.csproj", "{FBF029E4-225D-476B-8073-8002260B9D0A}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DepartmentManagement.Infrastructure", "src\DepartmentManagement.Infrastructure\DepartmentManagement.Infrastructure.csproj", "{11C4FAE4-54F6-42A5-928A-0E0D39066C5C}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DepartmentManagement.Contracts", "src\DepartmentManagement.Contracts\DepartmentManagement.Contracts.csproj", "{B2A3668B-A92B-409B-A84A-4C7F6EFA107B}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DepartmentManagement.Api", "src\DepartmentManagement.Api\DepartmentManagement.Api.csproj", "{B9F9F5A6-D911-4077-AAA5-1582D493AD4B}"
+EndProject
+
 Global
     GlobalSection(SolutionConfigurationPlatforms) = preSolution
         Debug|Any CPU = Debug|Any CPU
@@ -26,5 +37,26 @@ Global
         {42FD7AC5-F4B3-47D2-9BD9-D5F3E5F45F47}.Debug|Any CPU.Build.0 = Debug|Any CPU
         {42FD7AC5-F4B3-47D2-9BD9-D5F3E5F45F47}.Release|Any CPU.ActiveCfg = Release|Any CPU
         {42FD7AC5-F4B3-47D2-9BD9-D5F3E5F45F47}.Release|Any CPU.Build.0 = Release|Any CPU
+        {2434A644-850C-463B-98C1-A4B8B0FBDFB0}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+        {2434A644-850C-463B-98C1-A4B8B0FBDFB0}.Debug|Any CPU.Build.0 = Debug|Any CPU
+        {2434A644-850C-463B-98C1-A4B8B0FBDFB0}.Release|Any CPU.ActiveCfg = Release|Any CPU
+        {2434A644-850C-463B-98C1-A4B8B0FBDFB0}.Release|Any CPU.Build.0 = Release|Any CPU
+        {FBF029E4-225D-476B-8073-8002260B9D0A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+        {FBF029E4-225D-476B-8073-8002260B9D0A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+        {FBF029E4-225D-476B-8073-8002260B9D0A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+        {FBF029E4-225D-476B-8073-8002260B9D0A}.Release|Any CPU.Build.0 = Release|Any CPU
+        {11C4FAE4-54F6-42A5-928A-0E0D39066C5C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+        {11C4FAE4-54F6-42A5-928A-0E0D39066C5C}.Debug|Any CPU.Build.0 = Debug|Any CPU
+        {11C4FAE4-54F6-42A5-928A-0E0D39066C5C}.Release|Any CPU.ActiveCfg = Release|Any CPU
+        {11C4FAE4-54F6-42A5-928A-0E0D39066C5C}.Release|Any CPU.Build.0 = Release|Any CPU
+        {B2A3668B-A92B-409B-A84A-4C7F6EFA107B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+        {B2A3668B-A92B-409B-A84A-4C7F6EFA107B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+        {B2A3668B-A92B-409B-A84A-4C7F6EFA107B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+        {B2A3668B-A92B-409B-A84A-4C7F6EFA107B}.Release|Any CPU.Build.0 = Release|Any CPU
+        {B9F9F5A6-D911-4077-AAA5-1582D493AD4B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+        {B9F9F5A6-D911-4077-AAA5-1582D493AD4B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+        {B9F9F5A6-D911-4077-AAA5-1582D493AD4B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+        {B9F9F5A6-D911-4077-AAA5-1582D493AD4B}.Release|Any CPU.Build.0 = Release|Any CPU
     EndGlobalSection
 EndGlobal
+
