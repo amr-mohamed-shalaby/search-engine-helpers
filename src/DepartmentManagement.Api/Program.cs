@@ -1,3 +1,4 @@
+
 using DepartmentManagement.Contracts;
 using DepartmentManagement.Infrastructure.DependencyInjection;
 using DepartmentManagement.Infrastructure.Identity;
