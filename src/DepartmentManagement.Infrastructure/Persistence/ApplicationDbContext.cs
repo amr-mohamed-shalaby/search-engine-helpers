@@ -12,6 +12,7 @@ public sealed class ApplicationDbContext(
     : IdentityDbContext<ApplicationUser, IdentityRole<Guid>, Guid>(options)
 {
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
+    public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -43,6 +44,50 @@ public sealed class ApplicationDbContext(
             entity.HasIndex(log => log.OccurredAtUtc);
             entity.HasIndex(log => new { log.UserId, log.OccurredAtUtc });
             entity.HasIndex(log => new { log.Module, log.Action, log.OccurredAtUtc });
+        });
+
+        builder.Entity<RefreshToken>(entity =>
+        {
+            entity.ToTable("RefreshTokens");
+            entity.HasKey(token => token.Id);
+
+            entity.Property(token => token.TokenHash)
+                .HasMaxLength(64)
+                .IsRequired();
+
+            entity.Property(token => token.ReplacedByTokenHash)
+                .HasMaxLength(64);
+
+            entity.Property(token => token.CreatedByIp)
+                .HasMaxLength(64);
+
+            entity.Property(token => token.RevokedByIp)
+                .HasMaxLength(64);
+
+            entity.Property(token => token.RowVersion)
+                .IsRowVersion();
+
+            entity.HasIndex(token => token.TokenHash)
+                .IsUnique();
+
+            entity.HasIndex(token => new
+            {
+                token.UserId,
+                token.ExpiresAtUtc
+            });
+
+            entity.HasIndex(token => new
+            {
+                token.UserId,
+                token.FamilyId
+            });
+
+            entity.HasIndex(token => token.FamilyId);
+
+            entity.HasOne<ApplicationUser>()
+                .WithMany()
+                .HasForeignKey(token => token.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
     }
 }

@@ -1,8 +1,9 @@
-<Project Sdk="Microsoft.NET.Sdk.Web">
+﻿<Project Sdk="Microsoft.NET.Sdk.Web">
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <UserSecretsId>e2b08eee-256f-45b9-b995-ad06d8e8f5db</UserSecretsId>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\DepartmentManagement.Application\DepartmentManagement.Application.csproj" />
@@ -10,6 +11,7 @@
     <ProjectReference Include="..\DepartmentManagement.Contracts\DepartmentManagement.Contracts.csproj" />
   </ItemGroup>
   <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.0" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.0">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>

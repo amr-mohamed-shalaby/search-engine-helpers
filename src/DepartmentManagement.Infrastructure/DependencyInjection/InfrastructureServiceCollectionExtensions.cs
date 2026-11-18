@@ -42,6 +42,7 @@ public static class InfrastructureServiceCollectionExtensions
                 options.User.RequireUniqueEmail = false;
             })
             .AddRoles<IdentityRole<Guid>>()
+            // .AddSignInManager()
             .AddEntityFrameworkStores<ApplicationDbContext>();
 
         return services;
