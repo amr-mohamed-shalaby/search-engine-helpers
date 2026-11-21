@@ -34,9 +34,10 @@ public sealed class CsvProjectConverter
         ValidateRequest(request, settings);
         ValidateEnabledFeatures(settings);
 
-        var fields = ReadFields(request.FieldsCsvPath, settings);
+        var autoFixes = new List<string>();
+        var fields = ReadFields(request.FieldsCsvPath, settings, autoFixes);
         var expected = DataFixedHeader.Concat(fields.Select(x => x.FieldName)).ToArray();
-        using var enumerator = ReadCsvRecords(request.DataCsvPath).GetEnumerator();
+        using var enumerator = ReadCsvRecords(request.DataCsvPath, autoFixes).GetEnumerator();
         if (!enumerator.MoveNext())
             throw new ConversionException("The data CSV is empty.", request.DataCsvPath, 1, "Header");
         ValidateExactHeader(enumerator.Current, expected, request.DataCsvPath, "Data CSV");
@@ -110,7 +111,7 @@ public sealed class CsvProjectConverter
                 conflicts.Add(new DataRowConflict(recordNumber, row.StartLine, row.Values.ToArray(), issues));
         }
 
-        return new ConversionPreflightResult(conflicts);
+        return new ConversionPreflightResult(conflicts, autoFixes);
     }
 
     private static bool TryParseNonNegative(string value, out long result) =>
@@ -129,7 +130,8 @@ public sealed class CsvProjectConverter
         ValidateRequest(request, settings);
         ValidateEnabledFeatures(settings);
 
-        var fields = ReadFields(request.FieldsCsvPath, settings);
+        var autoFixes = new List<string>();
+        var fields = ReadFields(request.FieldsCsvPath, settings, autoFixes);
         var folderName = request.FolderNameMode == OutputFolderNameMode.ArabicDisplayName
             ? request.Department.DisplayName
             : request.Department.Value;
@@ -151,7 +153,7 @@ public sealed class CsvProjectConverter
             WriteProjectXml(Path.Combine(stagingDirectory, "Project.xml"), request.Department.Value, stamp, settings);
             WriteFieldsXml(Path.Combine(stagingDirectory, "Project_Fields.xml"), fields, settings);
             var (rowCount, filmCount) = WriteDataXml(
-                Path.Combine(stagingDirectory, "Project_Data.xml"), request.DataCsvPath, fields, settings);
+                Path.Combine(stagingDirectory, "Project_Data.xml"), request.DataCsvPath, fields, settings, autoFixes);
             File.WriteAllBytes(Path.Combine(stagingDirectory, "Project_lookup_Fields.xml"),
                 Encoding.UTF8.GetBytes("<DocumentElement/>"));
 
@@ -166,7 +168,7 @@ public sealed class CsvProjectConverter
 
             CommitDirectory(stagingDirectory, targetDirectory, backupDirectory);
             return new DepartmentConversionResult(request.Department.Value, request.Department.DisplayName,
-                targetDirectory, rowCount, filmCount, fields.Count, summaries);
+                targetDirectory, rowCount, filmCount, fields.Count, summaries, autoFixes);
         }
         catch
         {
@@ -193,9 +195,9 @@ public sealed class CsvProjectConverter
         }
     }
 
-    private static List<FieldDefinition> ReadFields(string path, ConversionSettings settings)
+    private static List<FieldDefinition> ReadFields(string path, ConversionSettings settings, List<string>? autoFixes = null)
     {
-        using var enumerator = ReadCsvRecords(path).GetEnumerator();
+        using var enumerator = ReadCsvRecords(path, autoFixes).GetEnumerator();
         if (!enumerator.MoveNext())
             throw new ConversionException("The fields CSV is empty.", path, 1, "Header");
 
@@ -251,9 +253,9 @@ public sealed class CsvProjectConverter
     }
 
     private (long RowCount, int FilmCount) WriteDataXml(string outputPath, string csvPath,
-        IReadOnlyList<FieldDefinition> fields, ConversionSettings settings)
+        IReadOnlyList<FieldDefinition> fields, ConversionSettings settings, List<string>? autoFixes = null)
     {
-        using var enumerator = ReadCsvRecords(csvPath).GetEnumerator();
+        using var enumerator = ReadCsvRecords(csvPath, autoFixes).GetEnumerator();
         if (!enumerator.MoveNext())
             throw new ConversionException("The data CSV is empty.", csvPath, 1, "Header");
 
@@ -392,8 +394,9 @@ public sealed class CsvProjectConverter
         writer.WriteLine($"{new string('\t', indent)}<{name}>{escaped}</{name}>");
     }
 
-    private static IEnumerable<CsvRecord> ReadCsvRecords(string path)
+    private static IEnumerable<CsvRecord> ReadCsvRecords(string path, List<string>? autoFixes = null)
     {
+        var fileName = Path.GetFileName(path);
         using var enumerator = CsvReader.Read(path).GetEnumerator();
         while (true)
         {
@@ -417,6 +420,8 @@ public sealed class CsvProjectConverter
             }
 
             if (!hasNext) yield break;
+            if (autoFixes is not null)
+                foreach (var note in enumerator.Current.Notes) autoFixes.Add($"{fileName}: {note}");
             yield return enumerator.Current;
         }
     }

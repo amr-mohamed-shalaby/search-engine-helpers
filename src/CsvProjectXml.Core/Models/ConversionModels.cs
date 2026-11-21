@@ -17,7 +17,8 @@ public sealed record DepartmentConversionResult(
     long RowCount,
     int FilmCount,
     int FieldCount,
-    IReadOnlyList<OutputFileSummary> Files);
+    IReadOnlyList<OutputFileSummary> Files,
+    IReadOnlyList<string>? AutoFixes = null);
 
 public enum DepartmentBatchStatus
 {
@@ -37,7 +38,10 @@ public sealed record DataRowConflict(
     IReadOnlyList<string> Cells,
     IReadOnlyList<RowValidationIssue> Issues);
 
-public sealed record ConversionPreflightResult(IReadOnlyList<DataRowConflict> Conflicts)
+/// <param name="Conflicts">Rows that need a person's attention; the department is held back while any remain.</param>
+/// <param name="AutoFixes">Lossless corrections the CSV reader applied on its own (kept quotes, ignored empty columns, encoding...).</param>
+public sealed record ConversionPreflightResult(IReadOnlyList<DataRowConflict> Conflicts,
+    IReadOnlyList<string>? AutoFixes = null)
 {
     public bool HasConflicts => Conflicts.Count > 0;
     public bool IsValid => Conflicts.Count == 0;
