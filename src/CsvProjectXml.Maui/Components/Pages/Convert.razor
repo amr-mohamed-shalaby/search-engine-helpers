@@ -10,6 +10,8 @@
 @inject ConversionPageState ConversionPage
 @inject NavigationManager Navigation
 @inject IJSRuntime JS
+@inject ConflictWizardState Wizards
+@inject IFolderOpener FolderOpener
 
 <PageTitle>تحويل الملفات · CSV to Project XML</PageTitle>
 
@@ -109,7 +111,7 @@
         {
             <div class="repair-entry-card">
                 <div><strong>يمكن إصلاح تعارضات الصفوف يدوياً</strong><span>تم جمع كل الصفوف التي تحتاج إلى مراجعة. الملف الأصلي لن يتغير.</span></div>
-                <button class="btn btn-primary" @onclick="OpenSingleRepair">إصلاح التعارضات يدوياً</button>
+                <button class="btn btn-primary" @onclick="() => OpenWizard(null)">حل التعارضات</button>
             </div>
         }
     </div>
@@ -133,7 +135,12 @@
     <div class="result-section" id="conversion-results">
         <div class="report-path">تقرير العملية: <span class="mono">@ReportPath</span></div>
         <div class="result-banner success"><div class="result-banner-icon">✓</div><div><strong>تم تحويل الإدارة بنجاح</strong><p>@SingleResult.DisplayName · @SingleResult.RowCount.ToString("N0", CultureInfo.InvariantCulture) صف · @SingleResult.FilmCount فيلم</p></div></div>
-        <ResultFiles Files="SingleResult.Files" OutputDirectory="SingleResult.OutputDirectory" />
+        <div class="form-actions">
+            <button class="btn btn-outline" @onclick="() => Browse(SingleResult.OutputDirectory)">استعراض</button>
+            <button class="btn btn-outline" @onclick="() => ToggleStats(SingleResult.Slug)">@(_openStats.Contains(SingleResult.Slug) ? "إخفاء الإحصائيات" : "عرض الإحصائيات")</button>
+        </div>
+        @if (!string.IsNullOrEmpty(BrowseError)) { <div class="alert alert-error">@BrowseError</div> }
+        @if (_openStats.Contains(SingleResult.Slug)) { <DepartmentStatistics Result="SingleResult" /> }
     </div>
 }
 
@@ -141,7 +148,14 @@
 {
     <div class="result-section" id="conversion-results">
         <div class="report-path">تقرير العملية: <span class="mono">@ReportPath</span></div>
-        <div class="section-heading"><div><h2>ملخص المعالجة الجماعية</h2><p>تمت معالجة كل إدارة بصورة مستقلة؛ فشل إدارة لا يمنع عرض نتائج بقية الإدارات.</p></div></div>
+        <div class="section-heading">
+            <div><h2>ملخص المعالجة الجماعية</h2><p>تمت معالجة كل إدارة بصورة مستقلة؛ فشل إدارة لا يمنع عرض نتائج بقية الإدارات.</p></div>
+            @if (ConflictCount > 0)
+            {
+                <button class="btn btn-primary" @onclick="() => OpenWizard(null)">حل كل التعارضات (@ConflictCount)</button>
+            }
+        </div>
+        @if (!string.IsNullOrEmpty(BrowseError)) { <div class="alert alert-error">@BrowseError</div> }
         <div class="summary-cards">
             <div class="summary-tile"><strong>@BatchResult.ConvertedCount</strong><span>تم تحويلها</span></div>
             <div class="summary-tile"><strong>@BatchResult.FailedCount</strong><span>فشل التحويل</span></div>
@@ -159,12 +173,23 @@
                         <td>@(item.Result?.FilmCount.ToString(CultureInfo.InvariantCulture) ?? "—")</td>
                         <td class="message-cell">@(item.Message ?? item.Result?.OutputDirectory ?? "—")</td>
                         <td>
+                            <div class="row-actions">
                             @if (item.RepairSessionId is Guid repairId)
                             {
-                                <button class="btn btn-small btn-primary" @onclick="() => OpenRepair(repairId)">إصلاح التعارضات</button>
+                                <button class="btn btn-small btn-primary" @onclick="() => OpenWizard(repairId)">حل التعارضات</button>
                             }
+                            @if (item.Status == DepartmentBatchStatus.Converted && item.Result is { } converted)
+                            {
+                                <button class="btn btn-small btn-outline" @onclick="() => ToggleStats(item.Slug)">@(_openStats.Contains(item.Slug) ? "إخفاء الإحصائيات" : "عرض الإحصائيات")</button>
+                                <button class="btn btn-small btn-outline" @onclick="() => Browse(converted.OutputDirectory)">استعراض</button>
+                            }
+                            </div>
                         </td>
                     </tr>
+                    @if (item.Result is { } statsResult && _openStats.Contains(item.Slug))
+                    {
+                        <tr class="stats-row"><td colspan="6"><DepartmentStatistics Result="statsResult" /></td></tr>
+                    }
                 }
             </tbody></table></div>
         </div>
@@ -172,15 +197,25 @@
         {
             <div class="notice-card warning"><div class="notice-icon">!</div><div><strong>ملفات CSV غير مرتبطة بسجل الإدارات (@BatchResult.OrphanCsvFiles.Count)</strong><p>@foreach (var path in BatchResult.OrphanCsvFiles) { <span class="orphan-path">@Path.GetFileName(path)</span> }</p></div></div>
         }
-        @foreach (var item in BatchResult.Departments.Where(x => x.Result is not null))
-        {
-            <details class="department-details"><summary>@item.DisplayName — تفاصيل الملفات والـ SHA-256</summary><ResultFiles Files="item.Result!.Files" OutputDirectory="item.Result!.OutputDirectory" /></details>
-        }
     </div>
 }
 
 @code {
     private bool _scrollResultsIntoView;
+    private readonly HashSet<string> _openStats = new(StringComparer.OrdinalIgnoreCase);
+    private string BrowseError { get; set; } = string.Empty;
+    private int ConflictCount => (BatchResult?.Departments.Count(x => x.RepairSessionId is not null) ?? 0)
+        + (PendingRepairSessionId is not null ? 1 : 0);
+
+    private void ToggleStats(string slug)
+    {
+        if (!_openStats.Remove(slug)) _openStats.Add(slug);
+    }
+
+    private void Browse(string directory)
+    {
+        BrowseError = FolderOpener.TryOpen(directory, out var error) ? string.Empty : error;
+    }
 
     private string Mode { get; set; } = "single";
     private string NamesPath { get; set; } = string.Empty;
@@ -273,6 +308,9 @@
 
     private async Task RunConversion()
     {
+        Wizards.Discard();
+        _openStats.Clear();
+        BrowseError = string.Empty;
         ErrorMessage = string.Empty;
         SingleResult = null;
         BatchResult = null;
@@ -355,6 +393,8 @@
 
     private void Reset()
     {
+        Wizards.Discard();
+        _openStats.Clear();
         ConversionPage.Clear();
         FieldsCsvPath = string.Empty;
         DataCsvPath = string.Empty;
@@ -377,15 +417,10 @@
             settings, headers, conflicts, 0);
     }
 
-    private void OpenSingleRepair()
-    {
-        if (PendingRepairSessionId is Guid id) OpenRepair(id);
-    }
-
-    private void OpenRepair(Guid id)
+    private void OpenWizard(Guid? startAt)
     {
         SavePageState();
-        Navigation.NavigateTo($"/repair/{id}");
+        Navigation.NavigateTo(startAt is Guid id ? $"/resolve?start={id}" : "/resolve");
     }
 
     private void SavePageState()

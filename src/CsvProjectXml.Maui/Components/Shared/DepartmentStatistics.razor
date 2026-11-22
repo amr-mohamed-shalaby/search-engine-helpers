@@ -1,0 +1,75 @@
+@using System.Globalization
+
+<div class="stats-panel">
+    <div class="stats-tiles">
+        <div class="stats-tile"><strong>@Result.RowCount.ToString("N0", CultureInfo.InvariantCulture)</strong><span>صف</span></div>
+        <div class="stats-tile"><strong>@Result.FilmCount.ToString("N0", CultureInfo.InvariantCulture)</strong><span>فيلم</span></div>
+        <div class="stats-tile"><strong>@Result.FieldCount.ToString("N0", CultureInfo.InvariantCulture)</strong><span>حقل</span></div>
+        <div class="stats-tile"><strong>@Result.Files.Count</strong><span>ملف</span></div>
+        <div class="stats-tile"><strong>@FormatSize(Result.Files.Sum(file => file.SizeBytes))</strong><span>الحجم الكلي</span></div>
+    </div>
+    <p class="path-line">@Result.OutputDirectory</p>
+
+    @if (Groups.Count > 0)
+    {
+        <div class="stats-groups">
+            <h4>تصحيحات تلقائية تمت أثناء القراءة</h4>
+            @foreach (var group in Groups)
+            {
+                <details class="stats-group">
+                    <summary>
+                        <span>@GroupLabel(group.Kind)</span>
+                        <span class="state-tag state-muted">@group.Count</span>
+                        @if (group.NeedsReview > 0)
+                        {
+                            <span class="state-tag state-warning">@group.NeedsReview للمراجعة</span>
+                        }
+                    </summary>
+                    <ul>
+                        @foreach (var message in group.Messages.Take(MaxMessages))
+                        {
+                            <li>@message</li>
+                        }
+                    </ul>
+                    @if (group.Messages.Count > MaxMessages)
+                    {
+                        <small class="field-hint">يتم عرض أول @MaxMessages من @group.Messages.Count.</small>
+                    }
+                </details>
+            }
+        </div>
+    }
+    else
+    {
+        <p class="field-hint">لم تُجرَ أي تصحيحات تلقائية؛ الملفات قُرئت كما هي.</p>
+    }
+
+    <ResultFiles Files="Result.Files" OutputDirectory="Result.OutputDirectory" />
+</div>
+
+@code {
+    private const int MaxMessages = 50;
+
+    [Parameter, EditorRequired] public DepartmentConversionResult Result { get; set; } = default!;
+
+    private IReadOnlyList<AutoFixGroup> Groups => AutoFixSummary.Group(Result.AutoFixes);
+
+    private static string GroupLabel(AutoFixKind kind) => kind switch
+    {
+        AutoFixKind.DuplicatePhotoPath => "مسارات صور مكررة",
+        AutoFixKind.ExtraCells => "خلايا زائدة",
+        AutoFixKind.Quotes => "علامات اقتباس",
+        AutoFixKind.Encoding => "ترميز الملف",
+        AutoFixKind.Delimiter => "الفاصل",
+        AutoFixKind.EmptyColumns => "أعمدة فارغة",
+        AutoFixKind.ListValues => "قيم القوائم",
+        _ => "أخرى"
+    };
+
+    private static string FormatSize(long bytes)
+    {
+        if (bytes >= 1024 * 1024) return $"{bytes / 1024.0 / 1024.0:0.#} MB";
+        if (bytes >= 1024) return $"{bytes / 1024.0:0.#} KB";
+        return $"{bytes} B";
+    }
+}

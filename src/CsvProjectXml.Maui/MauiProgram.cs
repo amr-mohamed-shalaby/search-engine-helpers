@@ -30,7 +30,9 @@ public static class MauiProgram
         builder.Services.AddSingleton<RepairSessionStore>();
         builder.Services.AddSingleton<ConversionPageState>();
         builder.Services.AddSingleton<WorkspaceState>();
+        builder.Services.AddSingleton<ConflictWizardState>();
         builder.Services.AddSingleton<IPathPicker, WindowsPathPicker>();
+        builder.Services.AddSingleton<IFolderOpener, WindowsFolderOpener>();
         return builder.Build();
     }
 }
