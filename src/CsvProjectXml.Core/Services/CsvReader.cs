@@ -30,7 +30,13 @@ public static class CsvReader
 {
     private const int MaxQuotedLineBreaks = 50;
 
-    public static IEnumerable<CsvRecord> Read(string path)
+    /// <param name="path">CSV file.</param>
+    /// <param name="rawTailColumn">
+    /// Zero-based column whose cell is the rest of the line, read verbatim (no quote or delimiter handling).
+    /// Use it for a last column that holds free-form text such as a JSON list with unquoted commas.
+    /// -1 (default) disables it.
+    /// </param>
+    public static IEnumerable<CsvRecord> Read(string path, int rawTailColumn = -1)
     {
         var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read,
             bufferSize: 64 * 1024, FileOptions.SequentialScan);
@@ -43,7 +49,7 @@ public static class CsvReader
             using var reader = new StreamReader(stream, encoding,
                 detectEncodingFromByteOrderMarks: false, bufferSize: 64 * 1024, leaveOpen: false);
 
-            foreach (var record in Parse(reader, fileNotes))
+            foreach (var record in Parse(reader, fileNotes, rawTailColumn))
                 yield return record;
         }
         finally
@@ -140,7 +146,7 @@ public static class CsvReader
 
     // ---------------------------------------------------------------- parsing
 
-    private static IEnumerable<CsvRecord> Parse(TextReader reader, List<string> fileNotes)
+    private static IEnumerable<CsvRecord> Parse(TextReader reader, List<string> fileNotes, int rawTailColumn)
     {
         var source = new Source(reader);
         var delimiter = SniffDelimiter(source, fileNotes);
@@ -154,7 +160,7 @@ public static class CsvReader
             var notes = new List<string>();
             if (first) notes.AddRange(fileNotes);
 
-            var cells = ParseRecord(source, delimiter, allowMultiline: true, line,
+            var cells = ParseRecord(source, delimiter, allowMultiline: true, rawTailColumn, line,
                 out var startLine, out var endLine, out var usedMultiline, notes);
             if (cells is null) yield break;
 
@@ -167,7 +173,7 @@ public static class CsvReader
                 var raw = source.Recorded.ToString();
                 source.Unread(raw);
                 var retryNotes = new List<string>();
-                var retry = ParseRecord(source, delimiter, allowMultiline: false, startLine,
+                var retry = ParseRecord(source, delimiter, allowMultiline: false, rawTailColumn, startLine,
                     out var retryStart, out var retryEnd, out _, retryNotes);
                 if (retry is not null)
                     TrimTrailingEmptyCells(retry, expectedWidth, retryStart, retryNotes);
@@ -187,7 +193,7 @@ public static class CsvReader
                     source.Unread(source.Recorded.ToString());
                     notes = [];
                     if (first) notes.AddRange(fileNotes);
-                    cells = ParseRecord(source, delimiter, allowMultiline: true, startLine,
+                    cells = ParseRecord(source, delimiter, allowMultiline: true, rawTailColumn, startLine,
                         out startLine, out endLine, out _, notes)!;
                     TrimTrailingEmptyCells(cells, expectedWidth, startLine, notes);
                 }
@@ -279,7 +285,7 @@ public static class CsvReader
     /// <summary>
     /// Parses one record (skipping blank lines). Returns null at end of input.
     /// </summary>
-    private static List<string>? ParseRecord(Source source, char delimiter, bool allowMultiline, int line,
+    private static List<string>? ParseRecord(Source source, char delimiter, bool allowMultiline, int rawTailColumn, int line,
         out int startLine, out int endLine, out bool usedMultiline, List<string> notes)
     {
         var cells = new List<string>();
@@ -402,6 +408,12 @@ public static class CsvReader
                 field.Clear();
                 strayQuoteNoted = false;
                 touched = true;
+                if (rawTailColumn >= 0 && cells.Count == rawTailColumn)
+                {
+                    // The rest of the line is one cell, whatever it contains.
+                    for (var next = source.Peek(); next != -1 && next != '\r' && next != '\n'; next = source.Peek())
+                        field.Append((char)source.Read());
+                }
             }
             else if (ch == '\r' || ch == '\n')
             {

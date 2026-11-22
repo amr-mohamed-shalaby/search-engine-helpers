@@ -38,12 +38,13 @@ The byte-for-byte golden test is implemented and is conditionally skipped until 
 2. Windows desktop is the first deployment target; runtime processing is offline.
 3. The five observed project constants are global defaults. If they vary per department, add per-department configuration.
 4. Timestamp default is `MM/dd/yyyy hh:mm:ss AM/PM` in local machine time. Confirm date order and the archive system's timezone.
-5. Empty values default to paired tags. Confirm whether the importer prefers `<field></field>` or `<field/>`.
-6. `NVARCHAR=1` is the only confirmed field type mapping. Confirm codes for every other target type.
-7. Non-empty `ListValues` is not implemented until the lookup XML schema is supplied.
+5. ~~Empty values~~ - V1 writes self-closing `<field/>`; this is now the default.
+6. `NVARCHAR=1` and `LIST=5` are confirmed. Confirm codes for every other target type (for example `DATE`).
+7. ~~Non-empty `ListValues`~~ - implemented from real V1 output (reverse field order, reverse item order, `FIELD_LOOKUP_ORDER` = position in the reversed sequence).
+7a. V1 dropped extra cells and deleted quotation marks; both are now opt-in settings (`ExtraColumnsMode`, `QuoteHandling`).
 8. `FilmType` is copied from the data CSV and validated as a non-negative integer; no master mapping is assumed.
 9. `NotNull` validation remains off by default.
 10. Arabic output folder naming is opt-in; confirm whether it should become the default.
 11. Batch scanning is non-recursive (top-level CSVs only).
 12. The selected `names.json` file is the authoritative registry and is edited in place.
-13. Golden compatibility still requires the original three CSV pairs, their four XML files per department, and the exact timestamps.
+13. Golden compatibility: 9 real V1 departments (about 89,000 rows) were verified byte for byte with `ConversionSettings.V1Compatible()`. More V1 samples, especially ones containing `DATE` fields, would extend that.

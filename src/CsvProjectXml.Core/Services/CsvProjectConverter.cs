@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using CsvProjectXml.Core.Models;
 
@@ -20,6 +21,10 @@ public sealed class CsvProjectConverter
     private static readonly string[] DataFixedHeader = ["ID", "FilmId", "FilmType", "PortfolioId"];
     private static readonly string[] OutputFiles =
         ["Project.xml", "Project_Fields.xml", "Project_Data.xml", "Project_lookup_Fields.xml"];
+    /// <summary>Type codes observed in V1 output. Entries in conversion-settings.json take precedence.</summary>
+    private static readonly IReadOnlyDictionary<string, int> BuiltInFieldTypes =
+        new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase) { ["NVARCHAR"] = 1, ["LIST"] = 5 };
+
     private static readonly Regex XmlTagName = new("^[A-Za-z_][A-Za-z0-9_.-]*$", RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
     /// <summary>
@@ -43,27 +48,28 @@ public sealed class CsvProjectConverter
         ValidateExactHeader(enumerator.Current, expected, request.DataCsvPath, "Data CSV");
 
         var conflicts = new List<DataRowConflict>();
-        var portfolios = new HashSet<(long FilmId, long PortfolioId)>();
+        var photoPaths = new HashSet<(long FilmType, long FilmId, long PortfolioId)>();
         long recordNumber = 0;
 
         while (enumerator.MoveNext())
         {
             var row = enumerator.Current;
             recordNumber++;
+            var rowValues = NormalizeDataRow(row, expected, settings, request.DataCsvPath, autoFixes);
             var issues = new List<RowValidationIssue>();
             void Add(string code, string message, string? column) => issues.Add(new RowValidationIssue(code, message, column));
 
-            if (row.Values.Count != expected.Length)
+            if (rowValues.Count != expected.Length)
             {
-                var column = row.Values.Count > expected.Length
+                var column = rowValues.Count > expected.Length
                     ? $"#{expected.Length + 1} (unexpected extra column)"
-                    : expected[row.Values.Count];
+                    : expected[rowValues.Count];
                 Add("COLUMN_COUNT",
-                    $"Row has {row.Values.Count} columns; expected {expected.Length}.", column);
+                    $"Row has {rowValues.Count} columns; expected {expected.Length}.", column);
             }
             else
             {
-                var values = row.Values;
+                var values = rowValues;
                 long? filmId = TryParseNonNegative(values[1], out var parsedFilmId) ? parsedFilmId : null;
                 long? filmType = TryParseNonNegative(values[2], out var parsedFilmType) ? parsedFilmType : null;
                 long? portfolioId = TryParseNonNegative(values[3], out var parsedPortfolioId) ? parsedPortfolioId : null;
@@ -72,9 +78,13 @@ public sealed class CsvProjectConverter
                 if (filmType is null) Add("INVALID_FILM_TYPE", $"'{values[2]}' is not a non-negative integer.", "FilmType");
                 if (portfolioId is null) Add("INVALID_PORTFOLIO_ID", $"'{values[3]}' is not a non-negative integer.", "PortfolioId");
 
-                if (filmId is not null && portfolioId is not null && !portfolios.Add((filmId.Value, portfolioId.Value)))
-                    Add("DUPLICATE_FILM_PORTFOLIO",
-                        $"Duplicate (FilmId, PortfolioId) pair ({values[1]}, {values[3]}).", "FilmId/PortfolioId");
+                if (filmId is not null && filmType is not null && portfolioId is not null
+                    && !photoPaths.Add((filmType.Value, filmId.Value, portfolioId.Value)))
+                {
+                    var message = $"PHOTO_PATH \\Scan_Tree\\{values[2]}\\{values[1]}\\Film\\{values[3]} is used by more than one row.";
+                    if (settings.RejectDuplicatePhotoPaths) Add("DUPLICATE_PHOTO_PATH", message, "FilmId/PortfolioId");
+                    else autoFixes.Add($"{Path.GetFileName(request.DataCsvPath)}: line {row.StartLine}: REVIEW - {message} It is written as-is, like V1.");
+                }
 
                 ValidateXmlValue(values[1], "FilmId", Add);
                 ValidateXmlValue(values[2], "FilmType", Add);
@@ -154,8 +164,7 @@ public sealed class CsvProjectConverter
             WriteFieldsXml(Path.Combine(stagingDirectory, "Project_Fields.xml"), fields, settings);
             var (rowCount, filmCount) = WriteDataXml(
                 Path.Combine(stagingDirectory, "Project_Data.xml"), request.DataCsvPath, fields, settings, autoFixes);
-            File.WriteAllBytes(Path.Combine(stagingDirectory, "Project_lookup_Fields.xml"),
-                Encoding.UTF8.GetBytes("<DocumentElement/>"));
+            WriteLookupXml(Path.Combine(stagingDirectory, "Project_lookup_Fields.xml"), fields, settings);
 
             var summaries = OutputFiles.Select(fileName =>
             {
@@ -197,7 +206,8 @@ public sealed class CsvProjectConverter
 
     private static List<FieldDefinition> ReadFields(string path, ConversionSettings settings, List<string>? autoFixes = null)
     {
-        using var enumerator = ReadCsvRecords(path, autoFixes).GetEnumerator();
+        // ListValues is the last column and holds a JSON list typed without CSV quoting, so it is read as the rest of the line.
+        using var enumerator = ReadCsvRecords(path, autoFixes, rawTailColumn: FieldsHeader.Length - 1).GetEnumerator();
         if (!enumerator.MoveNext())
             throw new ConversionException("The fields CSV is empty.", path, 1, "Header");
 
@@ -233,12 +243,12 @@ public sealed class CsvProjectConverter
                 throw new ConversionException($"Duplicate FieldName '{fieldName}'.", path, row.StartLine, "FieldName");
             if (fieldSize < 0)
                 throw new ConversionException("FieldSize cannot be negative.", path, row.StartLine, "FieldSize");
-            if (listValues.Length > 0)
-                throw new ConversionException("Non-empty ListValues cannot be exported: the V1 lookup XML format is unknown.",
-                    path, row.StartLine, "ListValues");
+            var listItems = ParseListValues(listValues, fieldName, path, row.StartLine, autoFixes);
 
             var typeMap = settings.FieldTypeMap ?? throw new ConversionException("FieldTypeMap is missing from settings.");
             var typeMatch = typeMap.FirstOrDefault(x => string.Equals(x.Key, fieldType, StringComparison.OrdinalIgnoreCase));
+            if (typeMatch.Key is null && BuiltInFieldTypes.TryGetValue(fieldType, out var builtInCode))
+                typeMatch = new KeyValuePair<string, int>(fieldType, builtInCode);
             if (typeMatch.Key is null)
                 throw new ConversionException($"FieldType '{fieldType}' is not mapped. Add an explicit mapping in conversion-settings.json.",
                     path, row.StartLine, "FieldType");
@@ -246,7 +256,7 @@ public sealed class CsvProjectConverter
             XmlText.ValidateXml10(fieldName, path, row.StartLine, "FieldName");
             XmlText.ValidateXml10(fieldNameAr, path, row.StartLine, "FieldNameAr");
             definitions.Add(new FieldDefinition(sourceId, fieldName, fieldNameAr, fieldType,
-                fieldSize, notNull, listValues, typeMatch.Value));
+                fieldSize, notNull, listValues, typeMatch.Value, listItems));
         }
 
         return definitions;
@@ -269,13 +279,14 @@ public sealed class CsvProjectConverter
 
         long rowCount = 0;
         var films = new HashSet<long>();
-        var portfolios = new HashSet<(long FilmId, long PortfolioId)>();
+        var photoPaths = new HashSet<(long FilmType, long FilmId, long PortfolioId)>();
 
         while (enumerator.MoveNext())
         {
             var row = enumerator.Current;
-            ValidateColumnCount(row, expected.Length, csvPath, expected);
-            var values = row.Values;
+            var values = NormalizeDataRow(row, expected, settings, csvPath, autoFixes);
+            if (values.Count != expected.Length)
+                ValidateColumnCount(new CsvRecord(values, row.StartLine), expected.Length, csvPath, expected);
             var filmIdRaw = values[1];
             var filmTypeRaw = values[2];
             var portfolioRaw = values[3];
@@ -283,9 +294,13 @@ public sealed class CsvProjectConverter
             var filmType = ParseNonNegativeLong(filmTypeRaw, csvPath, row.StartLine, "FilmType");
             var portfolioId = ParseNonNegativeLong(portfolioRaw, csvPath, row.StartLine, "PortfolioId");
 
-            if (!portfolios.Add((filmId, portfolioId)))
-                throw new ConversionException($"Duplicate (FilmId, PortfolioId) pair ({filmIdRaw}, {portfolioRaw}).",
-                    csvPath, row.StartLine, "FilmId/PortfolioId");
+            if (!photoPaths.Add((filmType, filmId, portfolioId)))
+            {
+                var message = $"PHOTO_PATH \\Scan_Tree\\{filmTypeRaw}\\{filmIdRaw}\\Film\\{portfolioRaw} is used by more than one row.";
+                if (settings.RejectDuplicatePhotoPaths)
+                    throw new ConversionException(message, csvPath, row.StartLine, "FilmId/PortfolioId");
+                autoFixes?.Add($"{Path.GetFileName(csvPath)}: line {row.StartLine}: REVIEW - {message} It is written as-is, like V1.");
+            }
             films.Add(filmId);
 
             writer.WriteLine("\t<Data>");
@@ -320,6 +335,129 @@ public sealed class CsvProjectConverter
         writer.WriteLine("</DocumentElement>");
         writer.Flush();
         return (rowCount, films.Count);
+    }
+
+    /// <summary>
+    /// Applies the opt-in row clean-ups chosen in the settings (extra cells, quotation marks) and reports every
+    /// change for review. With the default settings the row is returned unchanged.
+    /// </summary>
+    private static IReadOnlyList<string> NormalizeDataRow(CsvRecord row, IReadOnlyList<string> columns,
+        ConversionSettings settings, string path, List<string>? autoFixes)
+    {
+        IReadOnlyList<string> values = row.Values;
+        var width = columns.Count;
+        var file = Path.GetFileName(path);
+
+        if (values.Count > width && settings.ExtraColumnsMode != ExtraColumnsMode.Hold)
+        {
+            var extra = values.Count - width;
+            if (settings.ExtraColumnsMode == ExtraColumnsMode.MergeIntoLastColumn)
+            {
+                values = values.Take(width - 1).Append(string.Join(",", values.Skip(width - 1))).ToArray();
+                autoFixes?.Add($"{file}: line {row.StartLine}: REVIEW - {extra} extra cell(s) were joined into the last column '{columns[width - 1]}'.");
+            }
+            else
+            {
+                var dropped = string.Join(",", values.Skip(width));
+                values = values.Take(width).ToArray();
+                autoFixes?.Add($"{file}: line {row.StartLine}: REVIEW - {extra} extra cell(s) were dropped (V1 behavior); dropped text: {dropped}");
+            }
+        }
+
+        if (settings.QuoteHandling == QuoteHandling.Remove && values.Count == width)
+        {
+            List<string>? changed = null;
+            for (var index = DataFixedHeader.Length; index < values.Count; index++)
+            {
+                if (!values[index].Contains('"')) continue;
+                changed ??= values.ToList();
+                changed[index] = values[index].Replace("\"", string.Empty, StringComparison.Ordinal);
+                autoFixes?.Add($"{file}: line {row.StartLine}: quotation mark(s) were removed from '{columns[index]}'.");
+            }
+
+            if (changed is not null) values = changed;
+        }
+
+        return values;
+    }
+
+    /// <summary>
+    /// ListValues is a JSON array of texts, e.g. ["A","B"]. Exporting tools sometimes wrap the whole cell in CSV
+    /// quotes (with doubled inner quotes); that form is accepted too.
+    /// </summary>
+    private static IReadOnlyList<string> ParseListValues(string raw, string fieldName, string path, int line,
+        List<string>? autoFixes)
+    {
+        var text = raw.Trim();
+        if (text.Length == 0) return [];
+
+        if (text.Length >= 2 && text[0] == '"' && text[^1] == '"')
+        {
+            text = text[1..^1].Replace("\"\"", "\"", StringComparison.Ordinal);
+            autoFixes?.Add($"{Path.GetFileName(path)}: line {line}: ListValues of '{fieldName}' was wrapped in CSV quotes; they were removed.");
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(text);
+            if (document.RootElement.ValueKind != JsonValueKind.Array)
+                throw new ConversionException("ListValues must be a JSON array such as [\"A\",\"B\"].", path, line, "ListValues");
+
+            var items = new List<string>();
+            foreach (var element in document.RootElement.EnumerateArray())
+            {
+                var item = element.ValueKind switch
+                {
+                    JsonValueKind.String => element.GetString() ?? string.Empty,
+                    JsonValueKind.Number => element.GetRawText(),
+                    _ => throw new ConversionException("Every ListValues item must be text.", path, line, "ListValues")
+                };
+                XmlText.ValidateXml10(item, path, line, "ListValues");
+                items.Add(item);
+            }
+
+            return items;
+        }
+        catch (JsonException ex)
+        {
+            throw new ConversionException(
+                $"ListValues is not a valid JSON array of texts such as [\"A\",\"B\"] ({ex.Message}).",
+                path, line, "ListValues", ex);
+        }
+    }
+
+    /// <summary>
+    /// V1 layout (verified against real V1 output): list fields appear in reverse CSV order, each field's items in
+    /// reverse list order, and FIELD_LOOKUP_ORDER is the position of the field in that reversed sequence.
+    /// With no list items the file is exactly &lt;DocumentElement/&gt;.
+    /// </summary>
+    private static void WriteLookupXml(string path, IReadOnlyList<FieldDefinition> fields, ConversionSettings settings)
+    {
+        var lists = fields.Where(field => field.ListItems is { Count: > 0 }).Reverse().ToList();
+        if (lists.Count == 0)
+        {
+            File.WriteAllBytes(path, Encoding.UTF8.GetBytes("<DocumentElement/>"));
+            return;
+        }
+
+        using var writer = new XmlLineWriter(path);
+        writer.WriteLine("<DocumentElement>");
+        for (var order = 0; order < lists.Count; order++)
+        {
+            var field = lists[order];
+            foreach (var item in field.ListItems!.Reverse())
+            {
+                writer.WriteLine("\t<Project_lookup_Fields>");
+                WriteTag(writer, 2, "FIELD_LOOKUP_ORDER", order.ToString(CultureInfo.InvariantCulture));
+                WriteTag(writer, 2, "FIELD_NAME_ENG", field.FieldName);
+                WriteTag(writer, 2, "PROJECT_CODE", settings.ProjectCode.ToString(CultureInfo.InvariantCulture));
+                WriteTag(writer, 2, "FIELD_LOOKUP_TEXT", item);
+                writer.WriteLine("\t</Project_lookup_Fields>");
+            }
+        }
+
+        writer.WriteLine("</DocumentElement>");
+        writer.Flush();
     }
 
     private static void WriteProjectXml(string path, string slug, string stamp, ConversionSettings settings)
@@ -394,10 +532,10 @@ public sealed class CsvProjectConverter
         writer.WriteLine($"{new string('\t', indent)}<{name}>{escaped}</{name}>");
     }
 
-    private static IEnumerable<CsvRecord> ReadCsvRecords(string path, List<string>? autoFixes = null)
+    private static IEnumerable<CsvRecord> ReadCsvRecords(string path, List<string>? autoFixes = null, int rawTailColumn = -1)
     {
         var fileName = Path.GetFileName(path);
-        using var enumerator = CsvReader.Read(path).GetEnumerator();
+        using var enumerator = CsvReader.Read(path, rawTailColumn).GetEnumerator();
         while (true)
         {
             bool hasNext;

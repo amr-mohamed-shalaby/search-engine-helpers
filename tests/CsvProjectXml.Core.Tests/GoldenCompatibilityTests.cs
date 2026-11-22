@@ -25,7 +25,8 @@ public sealed class GoldenCompatibilityTests
         try
         {
             var converter = new CsvProjectConverter();
-            var settings = new ConversionSettings();
+            // V1 dropped extra cells and removed quotation marks; verify against its output with the same behavior.
+            var settings = ConversionSettings.V1Compatible();
             var compared = 0;
             foreach (var department in names)
             {

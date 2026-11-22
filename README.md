@@ -76,7 +76,9 @@ The default conversion path preserves the observable V1 rules from the supplied 
 - `<DocumentElement/>` lookup XML when `ListValues` is empty;
 - the four filenames and V1-style slug folder name by default.
 
-The type map initially contains only `NVARCHAR=1`. Unmapped field types fail explicitly. `ListValues` is required to be empty because the non-empty target lookup XML shape is unknown. Values are XML-escaped for `&`, `<`, and `>` while Arabic text, quotes, TABs, and trailing spaces are preserved.
+Built-in field types are `NVARCHAR=1` and `LIST=5` (both confirmed against real V1 output). Other types, such as `DATE`, fail explicitly until the V1 code is known; add it to `FieldTypeMap` in `conversion-settings.json`.
+
+`ListValues` is a JSON array typed into the CSV without quoting, e.g. `["A","B"]`; it is read as the rest of the line, so commas and quotes inside it are fine. V1 writes it to `Project_lookup_Fields.xml` with the list fields in reverse CSV order, each field's items in reverse list order, and `FIELD_LOOKUP_ORDER` equal to the position of the field in that reversed sequence. With no list values the file is exactly `<DocumentElement/>`. Values are XML-escaped for `&`, `<`, and `>` while Arabic text, quotes, TABs, and trailing spaces are preserved.
 
 The data CSV is streamed to a staging file. The four output files are committed as a department folder only after that department passes validation. This prevents a failed conversion from leaving a partial set of XML files. An existing output folder containing unrelated files or subdirectories is not overwritten.
 
@@ -154,19 +156,35 @@ The settings file is created beside `names.json` after the user saves settings. 
   "IsCivil": 1,
   "IsStructureCreated": 1,
   "TimestampFormat": "MM/dd/yyyy hh:mm:ss tt",
-  "EmptyValueMode": "PairedTags",
+  "EmptyValueMode": "SelfClosingTags",
+  "ExtraColumnsMode": "Hold",
+  "RejectDuplicatePhotoPaths": false,
+  "QuoteHandling": "Keep",
   "ValidateNotNull": false,
   "ValidateFieldSize": true,
   "EnabledFeatureIds": [],
   "FieldTypeMap": {
-    "NVARCHAR": 1
+    "NVARCHAR": 1,
+    "LIST": 5
   }
 }
 ```
 
 `ProjectCode`, `OrgCode`, `UserModificationCode`, `IsCivil`, and `IsStructureCreated` can be changed here or from the settings screen. Timestamp format is culture-invariant; the default uses the local machine clock and English AM/PM. A custom timestamp can also be supplied per conversion for deterministic replay.
 
-Empty value output defaults to `<field></field>`. V1's actual empty-value behavior was not observable; the setting can be switched to self-closing tags if the target system requires that form.
+Empty values default to the self-closing form `<field/>`, which is what V1 wrote. `PairedTags` (`<field></field>`) is available. If `conversion-settings.json` was saved by an earlier build it still says `PairedTags`; change it or delete the file.
+
+### Messy data: what V1 did, and the settings that control it
+
+Real V1 output shows that V1 split each line on commas, kept the first N cells, and deleted every `"` character. Those two behaviors lose data silently, so V2 does not do them unless asked:
+
+| Setting | Default | Options |
+|---|---|---|
+| `ExtraColumnsMode` (row has more cells than the header, usually a comma typed in text) | `Hold` - the row is held back as a conflict | `MergeIntoLastColumn` joins the extra cells into the last column; `DropExtra` drops them like V1 |
+| `QuoteHandling` (a `"` inside a value, e.g. `Ringer"s`) | `Keep` | `Remove` deletes quotation marks like V1 |
+| `RejectDuplicatePhotoPaths` (several rows with the same FilmType, FilmId and PortfolioId) | `false` - written as in V1 and reported | `true` holds such rows back |
+
+Every change is listed with file and line in the conversion report (`AutoFixes`); entries marked `REVIEW` deserve a look. `ConversionSettings.V1Compatible()` selects `DropExtra` and `Remove`; the golden test uses it.
 
 ## Tests
 
@@ -249,9 +267,9 @@ The following choices are implementation defaults, not facts established by the 
 2. **Platform:** initial delivery targets Windows desktop only, although MAUI itself is cross-platform.
 3. **Project identifiers:** `444`, `37`, `71`, `1`, and `1` are defaults; the settings file allows them to be changed.
 4. **Timestamp:** `MM/dd/yyyy hh:mm:ss AM/PM`, local machine time, English formatting. Confirm date order and the importing system's expected time zone.
-5. **Empty values:** paired tags (`<field></field>`) are the default; switchable to self-closing tags. Confirm with the importer.
-6. **Field types:** only `NVARCHAR=1` is preconfigured. Additional target-system type codes must be confirmed before adding mappings.
-7. **Lookup values:** `ListValues` must remain empty; non-empty lookup XML is not guessed.
+5. ~~Empty values~~ - confirmed from V1 output: self-closing `<field/>` (now the default).
+6. **Field types:** `NVARCHAR=1` and `LIST=5` are confirmed. `DATE` and any other type still need their V1 codes.
+7. ~~Lookup values~~ - confirmed from V1 output; see the `ListValues` section above.
 8. **FilmType:** the input `FilmType` is validated as a non-negative integer and copied; no department-to-FilmType master table is assumed.
 9. **NotNull:** ignored by default, as in V1; an opt-in validation flag is available.
 10. **Folder naming:** Arabic output folders are opt-in to protect V1 layout compatibility. Confirm whether the Arabic-folder feature should become the default in a later version.

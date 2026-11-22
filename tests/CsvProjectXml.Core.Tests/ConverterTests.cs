@@ -46,7 +46,7 @@ public sealed class ConverterTests : IDisposable
     }
 
     [Fact]
-    public void EmptyValuesUseExplicitPairedTagsByDefault()
+    public void EmptyValuesAreSelfClosingByDefaultLikeV1_AndPairedWhenRequested()
     {
         var input = CreateInput(
             "ID,FieldName,FieldNameAr,FieldType,FieldSize,NotNull,ListValues\r\n1,city,المدينة,NVARCHAR,100,True,\r\n",
@@ -54,8 +54,14 @@ public sealed class ConverterTests : IDisposable
 
         var result = Convert(input);
         var xml = File.ReadAllText(Path.Combine(result.OutputDirectory, "Project_Data.xml"), Encoding.UTF8);
-        Assert.Contains("<city></city>", xml);
-        Assert.DoesNotContain("<city/>", xml);
+        Assert.Contains("<city/>", xml);
+        Assert.DoesNotContain("<city></city>", xml);
+
+        var paired = _converter.Convert(new ConversionRequest(input.FieldsPath, input.DataPath, Path.Combine(_root, "paired"),
+            new DepartmentEntry { Index = 1, Value = Slug, Text = "x" }, OutputFolderNameMode.LegacySlug, Stamp),
+            new ConversionSettings { EmptyValueMode = EmptyValueMode.PairedTags });
+        var pairedXml = File.ReadAllText(Path.Combine(paired.OutputDirectory, "Project_Data.xml"), Encoding.UTF8);
+        Assert.Contains("<city></city>", pairedXml);
     }
 
     [Fact]
@@ -128,13 +134,16 @@ public sealed class ConverterTests : IDisposable
     }
 
     [Fact]
-    public void DuplicateFilmPortfolioPairIsRejectedAndNoPartialFolderIsWritten()
+    public void DuplicatePhotoPathIsRejectedWhenStrictAndNoPartialFolderIsWritten()
     {
         var input = CreateInput(
             "ID,FieldName,FieldNameAr,FieldType,FieldSize,NotNull,ListValues\r\n1,city,المدينة,NVARCHAR,100,True,\r\n",
             "ID,FilmId,FilmType,PortfolioId,city\r\n1,1,16,1,first\r\n2,1,16,1,duplicate\r\n");
 
-        var error = Assert.Throws<ConversionException>(() => Convert(input));
+        // V1 wrote duplicates, so rejecting them is opt-in (RejectDuplicatePhotoPaths).
+        var error = Assert.Throws<ConversionException>(() => _converter.Convert(new ConversionRequest(
+            input.FieldsPath, input.DataPath, _root, new DepartmentEntry { Index = 1, Value = Slug, Text = "x" },
+            OutputFolderNameMode.LegacySlug, Stamp), new ConversionSettings { RejectDuplicatePhotoPaths = true }));
         Assert.Equal(3, error.LineNumber);
         Assert.Equal("FilmId/PortfolioId", error.ColumnName);
         Assert.False(Directory.Exists(Path.Combine(_root, Slug)));

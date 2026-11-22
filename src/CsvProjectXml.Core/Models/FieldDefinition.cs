@@ -8,4 +8,5 @@ public sealed record FieldDefinition(
     int FieldSize,
     bool NotNull,
     string ListValues,
-    int XmlFieldType);
+    int XmlFieldType,
+    IReadOnlyList<string>? ListItems = null);

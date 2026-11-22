@@ -6,6 +6,35 @@ public enum EmptyValueMode
     SelfClosingTags
 }
 
+/// <summary>What to do with a data row that has more cells than the header (usually an unquoted comma in text).</summary>
+public enum ExtraColumnsMode
+{
+    /// <summary>Hold the row back as a conflict for manual correction (default; nothing is guessed).</summary>
+    Hold,
+
+    /// <summary>
+    /// Join the extra cells (with commas, exactly as typed) into the last column and report each row for review.
+    /// Correct when the comma was typed in the last column; wrong when it was typed in an earlier text column.
+    /// </summary>
+    MergeIntoLastColumn,
+
+    /// <summary>
+    /// Keep only the first cells and drop the rest. This is what V1 did; it silently loses the dropped text,
+    /// so each dropped value is listed in the report for review.
+    /// </summary>
+    DropExtra
+}
+
+/// <summary>What to do with quotation marks (") that are part of a data value, e.g. Ringer"s.</summary>
+public enum QuoteHandling
+{
+    /// <summary>Keep them exactly as typed (default).</summary>
+    Keep,
+
+    /// <summary>Delete them from data values. This is what V1 did.</summary>
+    Remove
+}
+
 public enum OutputFolderNameMode
 {
     LegacySlug,
@@ -23,12 +52,33 @@ public sealed class ConversionSettings
     public int IsCivil { get; set; } = 1;
     public int IsStructureCreated { get; set; } = 1;
     public string TimestampFormat { get; set; } = "MM/dd/yyyy hh:mm:ss tt";
-    public EmptyValueMode EmptyValueMode { get; set; } = EmptyValueMode.PairedTags;
+    public EmptyValueMode EmptyValueMode { get; set; } = EmptyValueMode.SelfClosingTags;
+    public ExtraColumnsMode ExtraColumnsMode { get; set; } = ExtraColumnsMode.Hold;
+
+    /// <summary>
+    /// V1 wrote several rows that share the same PHOTO_PATH (FilmType, FilmId, PortfolioId). By default that is
+    /// reported for review but not blocked; set to true to hold such rows back.
+    /// </summary>
+    public bool RejectDuplicatePhotoPaths { get; set; }
+
+    public QuoteHandling QuoteHandling { get; set; } = QuoteHandling.Keep;
+
     public bool ValidateNotNull { get; set; }
     public bool ValidateFieldSize { get; set; } = true;
     public List<string> EnabledFeatureIds { get; set; } = [];
+    /// <summary>
+    /// Reproduces V1's observable behavior on messy data: extra cells are dropped and quotation marks are removed
+    /// from values. Used to verify byte-for-byte compatibility against real V1 output.
+    /// </summary>
+    public static ConversionSettings V1Compatible() => new()
+    {
+        ExtraColumnsMode = ExtraColumnsMode.DropExtra,
+        QuoteHandling = QuoteHandling.Remove
+    };
+
     public Dictionary<string, int> FieldTypeMap { get; set; } = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["NVARCHAR"] = 1
+        ["NVARCHAR"] = 1,
+        ["LIST"] = 5
     };
 }
