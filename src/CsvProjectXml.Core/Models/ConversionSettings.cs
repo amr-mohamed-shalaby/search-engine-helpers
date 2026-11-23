@@ -63,6 +63,13 @@ public sealed class ConversionSettings
 
     public QuoteHandling QuoteHandling { get; set; } = QuoteHandling.Keep;
 
+    /// <summary>
+    /// A FieldType with no entry in <see cref="FieldTypeMap"/> (for example INT or DATE) normally stops the department.
+    /// When true, such fields are written with the NVARCHAR code instead (values are plain text in the XML either way)
+    /// and each field is listed for review. Prefer adding the real code to the map once it is known.
+    /// </summary>
+    public bool UnmappedFieldTypeAsText { get; set; }
+
     public bool ValidateNotNull { get; set; }
     public bool ValidateFieldSize { get; set; } = true;
     public List<string> EnabledFeatureIds { get; set; } = [];

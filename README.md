@@ -76,7 +76,7 @@ The default conversion path preserves the observable V1 rules from the supplied 
 - `<DocumentElement/>` lookup XML when `ListValues` is empty;
 - the four filenames and V1-style slug folder name by default.
 
-Built-in field types are `NVARCHAR=1` and `LIST=5` (both confirmed against real V1 output). Other types, such as `DATE`, fail explicitly until the V1 code is known; add it to `FieldTypeMap` in `conversion-settings.json`.
+Built-in field types are `NVARCHAR=1` and `LIST=5` (both confirmed against real V1 output). Other types, such as `INT` and `DATE`, fail explicitly until the V1 code is known; add it to `FieldTypeMap` in `conversion-settings.json`, or enable `UnmappedFieldTypeAsText` (Settings page) to write them as NVARCHAR and list each one for review. A repeated FieldName with no Arabic name of its own is ignored and reported.
 
 `ListValues` is a JSON array typed into the CSV without quoting, e.g. `["A","B"]`; it is read as the rest of the line, so commas and quotes inside it are fine. V1 writes it to `Project_lookup_Fields.xml` with the list fields in reverse CSV order, each field's items in reverse list order, and `FIELD_LOOKUP_ORDER` equal to the position of the field in that reversed sequence. With no list values the file is exactly `<DocumentElement/>`. Values are XML-escaped for `&`, `<`, and `>` while Arabic text, quotes, TABs, and trailing spaces are preserved.
 

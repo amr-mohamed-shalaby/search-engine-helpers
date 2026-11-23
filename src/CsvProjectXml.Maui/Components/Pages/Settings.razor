@@ -32,6 +32,7 @@
         <div class="divider-line"></div>
         <div class="panel-header compact"><div><span class="panel-step">FIELD TYPE MAP</span><h2>خريطة أنواع الحقول</h2><p>كل نوع يجب أن يكون له كود صريح. النوع غير المسجل يوقف التحويل بدلاً من التخمين.</p></div></div>
         <div class="field-group"><label>صيغة KEY=VALUE — سطر لكل نوع</label><textarea class="text-input map-textarea mono-input" @bind="FieldTypeMapText" dir="ltr" spellcheck="false"></textarea><div class="field-hint">المبدئي: NVARCHAR=1. لا تضف نوعاً إلا بعد معرفة كود النظام المستورد.</div></div>
+        <label class="check-row settings-check"><input type="checkbox" @bind="CustomSettings.UnmappedFieldTypeAsText" /><span><strong>معاملة الأنواع غير المسجلة كنص (NVARCHAR)</strong><small>بدلاً من إيقاف الإدارة عند نوع مثل INT أو DATE، يُكتب الحقل بكود NVARCHAR ويُدرج في قائمة المراجعة. الأفضل إضافة الكود الحقيقي أعلاه عند معرفته.</small></span></label>
         <div class="form-actions"><button class="btn btn-primary" @onclick="Save">حفظ الإعدادات</button><button class="btn btn-ghost" @onclick="Load">إعادة تحميل</button></div>
         @if (!string.IsNullOrWhiteSpace(Message)) { <div class="alert alert-success">@Message</div> }
         @if (!string.IsNullOrWhiteSpace(Error)) { <div class="alert alert-error">@Error</div> }

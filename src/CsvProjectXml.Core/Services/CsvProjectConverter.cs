@@ -239,6 +239,19 @@ public sealed class CsvProjectConverter
             if (new[] { "FILM_NUMBER", "FILM_TYPE", "PHOTO_PATH" }.Contains(fieldName, StringComparer.OrdinalIgnoreCase))
                 throw new ConversionException($"'{fieldName}' conflicts with a system field name.",
                     path, row.StartLine, "FieldName");
+            if (names.TryGetValue(fieldName, out var firstLine))
+            {
+                var first = definitions.First(x => string.Equals(x.FieldName, fieldName, StringComparison.Ordinal));
+                // A repeated row that adds nothing (same type, no Arabic name of its own) is a leftover line in the
+                // fields file: the data file has a single column for it. Keep the first definition and report it.
+                if (string.IsNullOrWhiteSpace(fieldNameAr) &&
+                    string.Equals(first.FieldType, fieldType, StringComparison.Ordinal))
+                {
+                    autoFixes?.Add($"REVIEW: {Path.GetFileName(path)} line {row.StartLine}: FieldName '{fieldName}' is repeated (first on line {firstLine}) without an Arabic name; the repeated row was ignored.");
+                    continue;
+                }
+            }
+
             if (!names.TryAdd(fieldName, row.StartLine))
                 throw new ConversionException(
                     $"Duplicate FieldName '{fieldName}' (first used on line {names[fieldName]}). Each field needs a unique name; rename one of them in the fields file and in the data file header.",
@@ -251,6 +264,11 @@ public sealed class CsvProjectConverter
             var typeMatch = typeMap.FirstOrDefault(x => string.Equals(x.Key, fieldType, StringComparison.OrdinalIgnoreCase));
             if (typeMatch.Key is null && BuiltInFieldTypes.TryGetValue(fieldType, out var builtInCode))
                 typeMatch = new KeyValuePair<string, int>(fieldType, builtInCode);
+            if (typeMatch.Key is null && settings.UnmappedFieldTypeAsText)
+            {
+                typeMatch = new KeyValuePair<string, int>(fieldType, BuiltInFieldTypes["NVARCHAR"]);
+                autoFixes?.Add($"REVIEW: {Path.GetFileName(path)} line {row.StartLine}: FieldType '{fieldType}' of field '{fieldName}' is not mapped; it was written as NVARCHAR ({typeMatch.Value}).");
+            }
             if (typeMatch.Key is null)
                 throw new ConversionException($"FieldType '{fieldType}' is not mapped. Add an explicit mapping in conversion-settings.json.",
                     path, row.StartLine, "FieldType");

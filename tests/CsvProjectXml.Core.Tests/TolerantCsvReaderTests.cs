@@ -211,6 +211,39 @@ public sealed class TolerantCsvReaderTests : IDisposable
         Assert.False(Directory.Exists(Path.Combine(_root, Slug)));
     }
 
+    [Fact]
+    public void UnmappedFieldTypeStopsTheDepartmentUnlessTreatedAsText()
+    {
+        var (fieldsPath, dataPath) = CreateInput(
+            FieldsHeader + "1,when,التاريخ,DATE,255,False,\r\n",
+            "ID,FilmId,FilmType,PortfolioId,when\r\n1,1,16,1,1/27/2016 12:00:00 AM\r\n");
+
+        Assert.Throws<ConversionException>(() => Convert(fieldsPath, dataPath));
+
+        var result = new CsvProjectConverter().Convert(Request(fieldsPath, dataPath),
+            new ConversionSettings { UnmappedFieldTypeAsText = true });
+        Assert.Contains(result.AutoFixes!, fix => fix.Contains("REVIEW", StringComparison.Ordinal)
+            && fix.Contains("'DATE'", StringComparison.Ordinal));
+        var xml = File.ReadAllText(Path.Combine(result.OutputDirectory, "Project_Data.xml"), Encoding.UTF8);
+        Assert.Contains("<when>1/27/2016 12:00:00 AM</when>", xml);
+    }
+
+    [Fact]
+    public void RepeatedFieldNameWithoutAnArabicNameIsIgnoredButAnyOtherDuplicateStillFails()
+    {
+        var (fieldsPath, dataPath) = CreateInput(
+            FieldsHeader + "1,addr,العنوان,NVARCHAR,255,False,\r\n2,addr,,NVARCHAR,255,False,\r\n",
+            "ID,FilmId,FilmType,PortfolioId,addr\r\n1,1,16,1,Cairo\r\n");
+        var result = Convert(fieldsPath, dataPath);
+        Assert.Equal(1, result.FieldCount);
+        Assert.Contains(result.AutoFixes!, fix => fix.Contains("REVIEW", StringComparison.Ordinal)
+            && fix.Contains("'addr'", StringComparison.Ordinal));
+
+        File.WriteAllText(fieldsPath, FieldsHeader + "1,addr,العنوان,NVARCHAR,255,False,\r\n2,addr,عنوان آخر,NVARCHAR,255,False,\r\n",
+            new UTF8Encoding(true));
+        Assert.Throws<ConversionException>(() => Convert(fieldsPath, dataPath));
+    }
+
     // ---------------------------------------------------------------- helpers
 
     private string Write(string name, string content)
