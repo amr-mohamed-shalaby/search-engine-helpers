@@ -1,0 +1,134 @@
+@using System.Globalization
+
+<div class="modal-backdrop-custom" @onclick="Close">
+    <div class="modal-dialog-custom" role="dialog" aria-modal="true" @onclick:stopPropagation="true">
+        <div class="modal-head">
+            <div>
+                <span class="panel-step">@Result.Slug</span>
+                <h3>@Result.DisplayName</h3>
+                <p class="path-line">@Result.OutputDirectory</p>
+            </div>
+            <button type="button" class="icon-button" aria-label="إغلاق" @onclick="Close">✕</button>
+        </div>
+
+        <div class="modal-body-custom">
+            <div class="stats-tiles">
+                <div class="stats-tile"><strong>@Result.RowCount.ToString("N0", CultureInfo.InvariantCulture)</strong><span>صف</span></div>
+                <div class="stats-tile"><strong>@Result.FilmCount.ToString("N0", CultureInfo.InvariantCulture)</strong><span>فيلم</span></div>
+                <div class="stats-tile"><strong>@Result.FieldCount.ToString("N0", CultureInfo.InvariantCulture)</strong><span>حقل</span></div>
+                <div class="stats-tile"><strong>@Result.Files.Count</strong><span>ملف</span></div>
+                <div class="stats-tile"><strong>@FormatSize(TotalSize)</strong><span>الحجم الكلي</span></div>
+            </div>
+
+            <div class="stats-charts">
+                <div class="chart-card">
+                    <h4>حجم كل ملف</h4>
+                    @foreach (var file in Result.Files)
+                    {
+                        var percent = TotalSize == 0 ? 0 : file.SizeBytes * 100.0 / MaxSize;
+                        <div class="bar-row">
+                            <span class="bar-label" dir="ltr">@file.FileName</span>
+                            <div class="bar-track"><div class="bar-fill" style="width:@(percent.ToString("0.##", CultureInfo.InvariantCulture))%"></div></div>
+                            <span class="bar-value">@FormatSize(file.SizeBytes)</span>
+                        </div>
+                    }
+                </div>
+
+                <div class="chart-card">
+                    <h4>التصحيحات التلقائية</h4>
+                    @if (Groups.Count == 0)
+                    {
+                        <p class="field-hint">لم تُجرَ أي تصحيحات تلقائية؛ الملفات قُرئت كما هي.</p>
+                    }
+                    else
+                    {
+                        <div class="donut-wrap">
+                            <svg viewBox="0 0 42 42" class="donut" role="img" aria-label="توزيع التصحيحات التلقائية">
+                                <circle cx="21" cy="21" r="15.915" fill="none" stroke="#eef2f5" stroke-width="6"></circle>
+                                @{ var offset = 25.0; }
+                                @for (var i = 0; i < Groups.Count; i++)
+                                {
+                                    var share = Groups[i].Count * 100.0 / GroupTotal;
+                                    <circle cx="21" cy="21" r="15.915" fill="none" stroke="@Palette[i % Palette.Length]" stroke-width="6"
+                                            stroke-dasharray="@share.ToString("0.###", CultureInfo.InvariantCulture) @((100 - share).ToString("0.###", CultureInfo.InvariantCulture))"
+                                            stroke-dashoffset="@offset.ToString("0.###", CultureInfo.InvariantCulture)"></circle>
+                                    offset -= share;
+                                }
+                                <text x="21" y="22.5" text-anchor="middle" class="donut-total">@GroupTotal</text>
+                            </svg>
+                            <ul class="legend">
+                                @for (var i = 0; i < Groups.Count; i++)
+                                {
+                                    <li>
+                                        <span class="legend-dot" style="background:@Palette[i % Palette.Length]"></span>
+                                        <span>@GroupLabel(Groups[i].Kind)</span>
+                                        <strong>@Groups[i].Count</strong>
+                                        @if (Groups[i].NeedsReview > 0) { <span class="state-tag state-warning">@Groups[i].NeedsReview للمراجعة</span> }
+                                    </li>
+                                }
+                            </ul>
+                        </div>
+                    }
+                </div>
+            </div>
+
+            @foreach (var group in Groups.Where(g => g.NeedsReview > 0))
+            {
+                <details class="stats-group">
+                    <summary><span>@GroupLabel(group.Kind) — تفاصيل المراجعة</span><span class="state-tag state-warning">@group.NeedsReview</span></summary>
+                    <ul>
+                        @foreach (var message in group.Messages.Where(m => m.Contains("REVIEW", StringComparison.Ordinal)).Take(MaxMessages))
+                        {
+                            <li>@message</li>
+                        }
+                    </ul>
+                </details>
+            }
+
+            <ResultFiles Files="Result.Files" OutputDirectory="Result.OutputDirectory" />
+        </div>
+
+        <div class="modal-foot">
+            @if (OnBrowse.HasDelegate)
+            {
+                <button class="btn btn-outline" @onclick="() => OnBrowse.InvokeAsync(Result.OutputDirectory)">استعراض المجلد</button>
+            }
+            <button class="btn btn-primary" @onclick="Close">إغلاق</button>
+        </div>
+    </div>
+</div>
+
+@code {
+    private const int MaxMessages = 50;
+    private static readonly string[] Palette = ["#16b8a6", "#0d8f82", "#f2b441", "#6c8cd5", "#d46c61", "#8f6cc4", "#9aa5af", "#4bb87a"];
+
+    [Parameter, EditorRequired] public DepartmentConversionResult Result { get; set; } = default!;
+    [Parameter] public EventCallback OnClose { get; set; }
+    [Parameter] public EventCallback<string> OnBrowse { get; set; }
+
+    private IReadOnlyList<AutoFixGroup> Groups => AutoFixSummary.Group(Result.AutoFixes);
+    private int GroupTotal => Math.Max(1, Groups.Sum(g => g.Count));
+    private long TotalSize => Result.Files.Sum(file => file.SizeBytes);
+    private long MaxSize => Math.Max(1, Result.Files.Max(file => file.SizeBytes));
+
+    private Task Close() => OnClose.InvokeAsync();
+
+    private static string GroupLabel(AutoFixKind kind) => kind switch
+    {
+        AutoFixKind.DuplicatePhotoPath => "مسارات صور مكررة",
+        AutoFixKind.ExtraCells => "خلايا زائدة",
+        AutoFixKind.Quotes => "علامات اقتباس",
+        AutoFixKind.Encoding => "ترميز الملف",
+        AutoFixKind.Delimiter => "الفاصل",
+        AutoFixKind.EmptyColumns => "أعمدة فارغة",
+        AutoFixKind.ListValues => "قيم القوائم",
+        _ => "أخرى"
+    };
+
+    private static string FormatSize(long bytes)
+    {
+        if (bytes >= 1024 * 1024) return $"{bytes / 1024.0 / 1024.0:0.#} MB";
+        if (bytes >= 1024) return $"{bytes / 1024.0:0.#} KB";
+        return $"{bytes} B";
+    }
+}

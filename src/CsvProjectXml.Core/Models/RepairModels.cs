@@ -55,7 +55,10 @@ public enum DepartmentRepairState
     Verified,
 
     /// <summary>The corrected copy was checked and some conflicts remain.</summary>
-    HasRemainingConflicts
+    HasRemainingConflicts,
+
+    /// <summary>The department was converted; its XML files exist and it is no longer editable.</summary>
+    Converted
 }
 
 public sealed record WizardConversionOutcome(

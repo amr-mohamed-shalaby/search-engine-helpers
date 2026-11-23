@@ -248,8 +248,58 @@ public sealed class ConflictWizardTests : IDisposable
         Assert.Equal("dept_a", outcome.Slug);
         Assert.NotNull(outcome.Result);
         Assert.Null(outcome.Error);
-        Assert.Equal(1, wizard.VerifiedCount);
+        Assert.Equal(1, wizard.ConvertedCount);
         Assert.False(Directory.Exists(Path.Combine(_root, "dept_b")));
+    }
+
+    [Fact]
+    public async Task FinishAndConvertWritesTheDepartmentImmediatelyAndMovesOn()
+    {
+        var a = CreateDepartment("dept_a");
+        var b = CreateDepartment("dept_b");
+        var wizard = new ConflictWizard([a, b]);
+        a.Rows[0].MergeWithNext(5);
+        a.ApplyRuleToAll(a.LearnRule()!);
+        a.Rows[2].Append();
+        a.Rows[3].Cells[1] = "8";
+
+        var outcome = await wizard.FinishAndConvertCurrentAsync(_repair, _converter);
+
+        Assert.NotNull(outcome?.Result);
+        Assert.Equal(DepartmentRepairState.Converted, a.State);
+        Assert.Same(outcome!.Result, a.Result);
+        Assert.True(File.Exists(Path.Combine(outcome.Result!.OutputDirectory, "Project_Data.xml")));
+        Assert.Equal(1, wizard.CurrentIndex);
+        Assert.Equal(1, wizard.ConvertedCount);
+        Assert.Equal(1, wizard.PendingCount);
+    }
+
+    [Fact]
+    public async Task FinishAndConvertReturnsNullAndStaysWhileConflictsRemain()
+    {
+        var a = CreateDepartment("dept_a");
+        var wizard = new ConflictWizard([a, CreateDepartment("dept_b")]);
+        a.Rows[0].MergeWithNext(5);
+
+        Assert.Null(await wizard.FinishAndConvertCurrentAsync(_repair, _converter));
+        Assert.Equal(0, wizard.CurrentIndex);
+        Assert.Equal(DepartmentRepairState.HasRemainingConflicts, a.State);
+    }
+
+    [Fact]
+    public async Task RevertingOneDepartmentLeavesTheOthersEditsAlone()
+    {
+        var a = CreateDepartment("dept_a");
+        var b = CreateDepartment("dept_b");
+        var wizard = new ConflictWizard([a, b]);
+        a.Rows[0].MergeWithNext(5);
+        b.Rows[0].MergeWithNext(5);
+
+        b.Reset();
+
+        Assert.False(b.HasEdits);
+        Assert.True(a.Rows[0].IsEdited);
+        Assert.Equal(wizard.Departments.Count, 2);
     }
 
     [Fact]

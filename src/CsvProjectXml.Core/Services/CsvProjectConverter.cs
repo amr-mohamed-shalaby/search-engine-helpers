@@ -214,7 +214,7 @@ public sealed class CsvProjectConverter
         var header = enumerator.Current;
         ValidateExactHeader(header, FieldsHeader, path, "Fields CSV");
         var definitions = new List<FieldDefinition>();
-        var names = new HashSet<string>(StringComparer.Ordinal);
+        var names = new Dictionary<string, int>(StringComparer.Ordinal);
 
         while (enumerator.MoveNext())
         {
@@ -239,8 +239,10 @@ public sealed class CsvProjectConverter
             if (new[] { "FILM_NUMBER", "FILM_TYPE", "PHOTO_PATH" }.Contains(fieldName, StringComparer.OrdinalIgnoreCase))
                 throw new ConversionException($"'{fieldName}' conflicts with a system field name.",
                     path, row.StartLine, "FieldName");
-            if (!names.Add(fieldName))
-                throw new ConversionException($"Duplicate FieldName '{fieldName}'.", path, row.StartLine, "FieldName");
+            if (!names.TryAdd(fieldName, row.StartLine))
+                throw new ConversionException(
+                    $"Duplicate FieldName '{fieldName}' (first used on line {names[fieldName]}). Each field needs a unique name; rename one of them in the fields file and in the data file header.",
+                    path, row.StartLine, "FieldName");
             if (fieldSize < 0)
                 throw new ConversionException("FieldSize cannot be negative.", path, row.StartLine, "FieldSize");
             var listItems = ParseListValues(listValues, fieldName, path, row.StartLine, autoFixes);

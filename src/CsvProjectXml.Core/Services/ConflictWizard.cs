@@ -25,6 +25,8 @@ public sealed class ConflictWizard
     public bool CanGoBack => CurrentIndex > 0;
     public bool CanGoNext => CurrentIndex < Departments.Count;
     public int VerifiedCount => Departments.Count(department => department.State == DepartmentRepairState.Verified);
+    public int ConvertedCount => Departments.Count(department => department.State == DepartmentRepairState.Converted);
+    public int PendingCount => Departments.Count - ConvertedCount;
 
     public void Next()
     {
@@ -57,6 +59,36 @@ public sealed class ConflictWizard
                        await current.VerifyAsync(repair, converter, cancellationToken);
         if (verified) Next();
         return verified;
+    }
+
+    /// <summary>
+    /// Checks the current department and, when it is clean, converts it right away so its result exists for real.
+    /// Moves to the next slide only when the conversion succeeded. Returns null while conflicts remain.
+    /// </summary>
+    public async Task<WizardConversionOutcome?> FinishAndConvertCurrentAsync(CsvRepairService repair,
+        CsvProjectConverter converter, CancellationToken cancellationToken = default)
+    {
+        var current = Current ?? throw new InvalidOperationException("There is no department on this slide.");
+        if (current.State != DepartmentRepairState.Converted)
+        {
+            if (current.State != DepartmentRepairState.Verified &&
+                !await current.VerifyAsync(repair, converter, cancellationToken))
+                return null;
+            try
+            {
+                var result = await current.ConvertAsync(converter, cancellationToken);
+                Next();
+                return new WizardConversionOutcome(current.Id, current.Slug, current.DisplayName, result, null);
+            }
+            catch (Exception ex) when (ex is ConversionException or IOException or InvalidOperationException)
+            {
+                return new WizardConversionOutcome(current.Id, current.Slug, current.DisplayName, null,
+                    ex is ConversionException conversion ? conversion.ToString() : ex.Message);
+            }
+        }
+
+        Next();
+        return new WizardConversionOutcome(current.Id, current.Slug, current.DisplayName, current.Result, null);
     }
 
     /// <summary>Converts every department whose conflicts are all fixed. The others are left as they were.</summary>

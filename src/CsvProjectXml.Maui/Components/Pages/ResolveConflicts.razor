@@ -16,22 +16,25 @@
     <div class="page-heading">
         <div>
             <div class="eyebrow">CONFLICT WIZARD</div>
-            <h1>@(Outcomes.Count > 0 ? "اكتملت المعالجة" : "لا توجد تعارضات لحلها")</h1>
-            <p>@(Outcomes.Count > 0 ? "هذه نتيجة الإدارات التي تم تحويلها." : "قد تكون الجلسة انتهت عند إغلاق التطبيق أو أُلغيت.")</p>
+            <h1>لا توجد تعارضات لحلها</h1>
+            <p>قد تكون الجلسة انتهت عند إغلاق التطبيق أو أُلغيت.</p>
         </div>
     </div>
-    @OutcomesPanel
     <div class="form-actions"><button class="btn btn-primary" @onclick="BackToConversion">العودة إلى التحويل</button></div>
 }
 else
 {
+    <div id="wizard-top"></div>
     <div class="page-heading">
         <div>
             <div class="eyebrow">CONFLICT WIZARD</div>
             <h1>حل تعارضات البيانات</h1>
-            <p>لن يتم تعديل الملفات الأصلية؛ تُحفظ نسخ مصححة في مجلد مستقل ويُعاد فحصها قبل التحويل.</p>
+            <p>لن يتم تعديل الملفات الأصلية؛ تُحفظ نسخ مصححة في مجلد مستقل، وتُحوَّل كل إدارة فور إنهاء تعارضاتها.</p>
         </div>
-        <div class="status-pill warning-pill">@(Wizard.IsReviewSlide ? "المراجعة النهائية" : $"الإدارة {Wizard.CurrentIndex + 1} من {Wizard.Departments.Count}")</div>
+        <div class="wizard-heading-actions">
+            <div class="status-pill warning-pill">@(Wizard.IsReviewSlide ? "المراجعة النهائية" : $"الإدارة {Wizard.CurrentIndex + 1} من {Wizard.Departments.Count}")</div>
+            <button type="button" class="btn btn-outline" disabled="@IsBusy" @onclick="BackToConversion">✕ إغلاق</button>
+        </div>
     </div>
 
     <div class="wizard-stepper">
@@ -40,7 +43,7 @@ else
             var index = i;
             var dep = Wizard.Departments[index];
             <button type="button" class="wizard-step @StepClass(dep, index)" title="@dep.DisplayName" @onclick="() => JumpTo(dep)">
-                <span class="wizard-step-dot">@(dep.State == DepartmentRepairState.Verified ? "✓" : (index + 1).ToString())</span>
+                <span class="wizard-step-dot">@(dep.State is DepartmentRepairState.Verified or DepartmentRepairState.Converted ? "✓" : (index + 1).ToString())</span>
                 <span class="wizard-step-name">@dep.DisplayName</span>
             </button>
         }
@@ -68,32 +71,44 @@ else
     </div>
 
     <div class="wizard-footer">
-        <button class="btn btn-ghost" disabled="@IsBusy" @onclick="() => _confirmCancel = true">إلغاء والتراجع عن التغييرات</button>
+        <button class="btn btn-ghost" disabled="@(IsBusy || Wizard.Current is not { State: not DepartmentRepairState.Converted })" @onclick="() => _confirmRevert = true">↺ تراجع عن تعديلات هذه الإدارة</button>
         <div class="wizard-footer-nav">
             <button class="btn btn-outline" disabled="@(IsBusy || !Wizard.CanGoBack)" @onclick="GoBack">→ السابق</button>
             @if (Wizard.Current is { } current)
             {
                 <button class="btn btn-outline" disabled="@(IsBusy || !Wizard.CanGoNext)" @onclick="GoNext">التالي ←</button>
-                <button class="btn btn-primary" disabled="@IsBusy" @onclick="FinishCurrent">
-                    @if (IsBusy) { <span class="spinner"></span><span>جارٍ الفحص...</span> }
-                    else { <span>إنهاء هذه الإدارة والانتقال للتالية</span> }
-                </button>
+                @if (current.State != DepartmentRepairState.Converted)
+                {
+                    <button class="btn btn-primary" disabled="@IsBusy" @onclick="FinishCurrent">
+                        @if (IsBusy) { <span class="spinner"></span><span>جارٍ الفحص والتحويل...</span> }
+                        else { <span>إنهاء وتحويل هذه الإدارة</span> }
+                    </button>
+                }
+            }
+            else
+            {
+                <button class="btn btn-primary" @onclick="BackToConversion">العودة إلى التحويل</button>
             }
         </div>
     </div>
 
-    @if (_confirmCancel)
+    @if (_confirmRevert && Wizard.Current is { } revertTarget)
     {
-        <div class="wizard-overlay">
-            <div class="wizard-confirm panel">
-                <h3>إلغاء المعالج؟</h3>
-                <p>سيتم التراجع عن كل التعديلات وحذف النسخ المصححة المؤقتة. ستبقى الملفات الأصلية كما هي.</p>
+        <div class="wizard-overlay" @onclick="() => _confirmRevert = false">
+            <div class="wizard-confirm panel" @onclick:stopPropagation="true">
+                <h3>التراجع عن تعديلات هذه الإدارة؟</h3>
+                <p>سيتم التراجع عن كل تعديلات «@revertTarget.DisplayName» فقط وحذف نسخها المصححة المؤقتة. تعديلات بقية الإدارات لن تتأثر.</p>
                 <div class="form-actions">
-                    <button class="btn btn-primary" @onclick="CancelWizard">نعم، تراجع عن التغييرات</button>
-                    <button class="btn btn-ghost" @onclick="() => _confirmCancel = false">متابعة التعديل</button>
+                    <button class="btn btn-primary" @onclick="RevertCurrent">نعم، تراجع</button>
+                    <button class="btn btn-ghost" @onclick="() => _confirmRevert = false">متابعة التعديل</button>
                 </div>
             </div>
         </div>
+    }
+
+    @if (_statsResult is not null)
+    {
+        <StatisticsDialog Result="_statsResult" OnClose="() => _statsResult = null" OnBrowse="Browse" />
     }
 }
 
@@ -103,10 +118,12 @@ else
     [SupplyParameterFromQuery(Name = "start")] public Guid? Start { get; set; }
 
     private ConflictWizard? Wizard { get; set; }
-    private List<WizardConversionOutcome> Outcomes { get; } = [];
     private readonly Dictionary<Guid, int> _pages = new();
     private readonly Dictionary<Guid, string> _ruleMessages = new();
-    private bool _confirmCancel;
+    private bool _confirmRevert;
+    private bool _scrollTop;
+    private DepartmentConversionResult? _statsResult;
+    private readonly HashSet<(Guid, long)> _collapsed = [];
     private string _slideClass = string.Empty;
     private string ErrorMessage { get; set; } = string.Empty;
     private bool IsBusy { get; set; }
@@ -154,6 +171,7 @@ else
         // RTL: moving forward slides the new slide in from the left.
         _slideClass = Wizard.CurrentIndex > before ? "slide-in-next" : "slide-in-prev";
         ErrorMessage = string.Empty;
+        _scrollTop = true;
     }
 
     private void GoNext() => Slide(Wizard!.Next);
@@ -168,13 +186,26 @@ else
         ErrorMessage = string.Empty;
         try
         {
-            var before = Wizard.CurrentIndex;
-            var ok = await Wizard.FinishCurrentAsync(RepairService, Converter);
+            var outcome = await Wizard.FinishAndConvertCurrentAsync(RepairService, Converter);
             _pages[department.Id] = 0;
-            if (ok) _slideClass = "slide-in-next";
-            else _ruleMessages.Remove(department.Id);
-            if (!ok && Wizard.CurrentIndex == before)
+            _ruleMessages.Remove(department.Id);
+            if (outcome is null)
+            {
                 ErrorMessage = department.Message ?? "ما زالت هناك تعارضات في هذه الإدارة.";
+            }
+            else if (outcome.Result is { } result)
+            {
+                // The XML files now exist: reflect that on the conversion page and in the report right away.
+                UpdateConversionPage(department, result);
+                Sessions.Remove(department.Id);
+                SaveReport(department, result);
+                _slideClass = "slide-in-next";
+                _scrollTop = true;
+            }
+            else
+            {
+                ErrorMessage = $"تعذر تحويل «{outcome.DisplayName}»: {outcome.Error}";
+            }
         }
         catch (Exception ex)
         {
@@ -186,24 +217,50 @@ else
         }
     }
 
-    private void CancelWizard()
+    private void RevertCurrent()
     {
-        Wizards.Discard();
-        Wizard = null;
-        _confirmCancel = false;
-        BackToConversion();
+        _confirmRevert = false;
+        if (Wizard?.Current is not { } department || department.State == DepartmentRepairState.Converted) return;
+        department.Reset();
+        _pages[department.Id] = 0;
+        _ruleMessages.Remove(department.Id);
+        _collapsed.RemoveWhere(key => key.Item1 == department.Id);
+        ErrorMessage = string.Empty;
     }
 
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!_scrollTop) return;
+        _scrollTop = false;
+        await JS.InvokeVoidAsync("csvProjectUi.scrollToElement", "wizard-top");
+    }
+
+    /// <summary>Leaves the wizard open in the background; every edit is kept until the user reverts it.</summary>
     private void BackToConversion() => Navigation.NavigateTo("/convert");
 
     // ------------------------------------------------------------------ editing
 
     private static string StepClass(DepartmentRepair dep, int index) => dep.State switch
     {
-        DepartmentRepairState.Verified => "done",
+        DepartmentRepairState.Verified or DepartmentRepairState.Converted => "done",
         DepartmentRepairState.HasRemainingConflicts => "remaining",
         _ => dep.HasEdits ? "edited" : string.Empty
     };
+
+    private bool IsCollapsed(DepartmentRepair dep, EditableConflictRow row) => _collapsed.Contains((dep.Id, row.RecordNumber));
+
+    private void ToggleRow(DepartmentRepair dep, EditableConflictRow row)
+    {
+        var key = (dep.Id, row.RecordNumber);
+        if (!_collapsed.Remove(key)) _collapsed.Add(key);
+    }
+
+    private void CollapseAll(DepartmentRepair dep)
+    {
+        foreach (var row in dep.Rows) _collapsed.Add((dep.Id, row.RecordNumber));
+    }
+
+    private void ExpandAll(DepartmentRepair dep) => _collapsed.RemoveWhere(key => key.Item1 == dep.Id);
 
     private void Merge(DepartmentRepair dep, EditableConflictRow row, int index)
     {
@@ -235,13 +292,6 @@ else
         dep.MarkEdited();
     }
 
-    private void ReopenDepartment(DepartmentRepair dep)
-    {
-        dep.Reset();
-        _pages[dep.Id] = 0;
-        _ruleMessages.Remove(dep.Id);
-    }
-
     private void ApplyRule(DepartmentRepair dep)
     {
         var rule = dep.LearnRule();
@@ -268,59 +318,7 @@ else
         _ => op.ToString() ?? string.Empty
     };
 
-    // ------------------------------------------------------------------ completion
-
-    private async Task Complete()
-    {
-        if (Wizard is null || IsBusy) return;
-        IsBusy = true;
-        ErrorMessage = string.Empty;
-        try
-        {
-            var outcomes = await Wizard.CompleteAsync(Converter);
-            var converted = new List<DepartmentRepair>();
-            foreach (var outcome in outcomes)
-            {
-                Outcomes.RemoveAll(x => x.DepartmentRepairId == outcome.DepartmentRepairId);
-                Outcomes.Add(outcome);
-                if (outcome.Result is null) continue;
-                var dep = Wizard.Departments.First(x => x.Id == outcome.DepartmentRepairId);
-                UpdateConversionPage(dep, outcome.Result);
-                Sessions.Remove(dep.Id);
-                converted.Add(dep);
-            }
-
-            SaveReport();
-
-            var remaining = Wizard.Departments.Except(converted).ToArray();
-            if (remaining.Length == 0)
-            {
-                Wizards.Clear();
-                Wizard = null;
-            }
-            else
-            {
-                var next = new ConflictWizard(remaining);
-                Wizards.Set(next);
-                Wizard = next;
-                JumpToReviewNoAnimation();
-            }
-        }
-        catch (Exception ex)
-        {
-            ErrorMessage = ex is ConversionException conversion ? conversion.ToString() : ex.Message;
-        }
-        finally
-        {
-            IsBusy = false;
-        }
-    }
-
-    private void JumpToReviewNoAnimation()
-    {
-        while (Wizard!.CanGoNext) Wizard.Next();
-        _slideClass = string.Empty;
-    }
+    // ------------------------------------------------------------------ results
 
     private void UpdateConversionPage(DepartmentRepair dep, DepartmentConversionResult result)
     {
@@ -347,24 +345,17 @@ else
         ConversionPage.Save(page with { BatchResult = batch with { Departments = updated }, ErrorMessage = string.Empty });
     }
 
-    /// <summary>One report write after the whole batch; a report failure never discards the converted result.</summary>
-    private void SaveReport()
+    /// <summary>A report failure never discards the converted result.</summary>
+    private void SaveReport(DepartmentRepair dep, DepartmentConversionResult result)
     {
         var page = ConversionPage.Current;
         if (page is null) return;
         try
         {
-            string path;
-            if (page.BatchResult is { } batch)
-                path = ReportWriter.SaveBatch(page.OutputFolder, batch);
-            else if (page.SingleResult is { } single && Outcomes.FirstOrDefault(x => x.Result == single) is { } outcome)
-            {
-                var dep = Wizard!.Departments.First(x => x.Id == outcome.DepartmentRepairId);
-                path = ReportWriter.SaveSingle(page.OutputFolder, single, dep.OriginalRequest.FieldsCsvPath,
+            var path = page.BatchResult is { } batch
+                ? ReportWriter.SaveBatch(page.OutputFolder, batch)
+                : ReportWriter.SaveSingle(page.OutputFolder, result, dep.OriginalRequest.FieldsCsvPath,
                     dep.OriginalRequest.DataCsvPath);
-            }
-            else return;
-
             ConversionPage.Save(ConversionPage.Current! with { ReportPath = path });
         }
         catch
@@ -396,9 +387,13 @@ else
                     <h2>@dep.DisplayName</h2>
                     <p class="repair-source">الملف الأصلي: <span dir="ltr">@dep.OriginalRequest.DataCsvPath</span></p>
                 </div>
-                @if (dep.State == DepartmentRepairState.Verified)
+                @if (dep.State == DepartmentRepairState.Converted)
                 {
-                    <span class="state-tag state-success">تم الإصلاح</span>
+                    <span class="state-tag state-success">تم التحويل</span>
+                }
+                else if (dep.State == DepartmentRepairState.Verified)
+                {
+                    <span class="state-tag state-warning">جاهزة — لم تُحوَّل بعد</span>
                 }
                 else
                 {
@@ -406,13 +401,21 @@ else
                 }
             </div>
 
-            @if (dep.State == DepartmentRepairState.Verified)
+            @if (dep.State == DepartmentRepairState.Converted && dep.Result is { } converted)
             {
                 <div class="result-banner success">
                     <div class="result-banner-icon">✓</div>
-                    <div><strong>تم إصلاح كل التعارضات</strong><p>سيتم تحويل هذه الإدارة في خطوة المراجعة النهائية.</p></div>
+                    <div><strong>تم إصلاح التعارضات وتحويل الإدارة</strong><p>@converted.RowCount.ToString("N0") صف · @converted.FilmCount فيلم · @converted.FieldCount حقل</p></div>
                 </div>
-                <div class="form-actions"><button class="btn btn-outline" @onclick="() => ReopenDepartment(dep)">إعادة فتح التعديل</button></div>
+                @if (!string.IsNullOrEmpty(BrowseError)) { <div class="alert alert-error">@BrowseError</div> }
+                <div class="form-actions">
+                    <button class="btn btn-outline" @onclick="() => Browse(converted.OutputDirectory)">استعراض</button>
+                    <button class="btn btn-outline" @onclick="() => _statsResult = converted">عرض الإحصائيات</button>
+                </div>
+            }
+            else if (dep.State == DepartmentRepairState.Verified)
+            {
+                <div class="alert alert-info"><strong>تم إصلاح كل التعارضات</strong><div>اضغط «إنهاء وتحويل هذه الإدارة» لإعادة محاولة التحويل.</div></div>
             }
             else
             {
@@ -422,7 +425,7 @@ else
                 }
 
                 <div class="wizard-rule-bar">
-                    <div>
+                    <div class="wizard-rule-main">
                         <strong>تطبيق على كل التعارضات</strong>
                         @if (rule is null)
                         {
@@ -430,62 +433,68 @@ else
                         }
                         else
                         {
-                            <span>الخطوات المكتشفة:</span>
-                            <ol class="wizard-rule-steps">
-                                @foreach (var step in rule.Steps)
-                                {
-                                    <li>@Describe(step)</li>
-                                }
-                            </ol>
+                            <span>الخطوات المكتشفة: @string.Join(" ← ", rule.Steps.Select(Describe))</span>
                         }
                         @if (_ruleMessages.TryGetValue(dep.Id, out var ruleMessage))
                         {
                             <span class="wizard-rule-result">@ruleMessage</span>
                         }
                     </div>
-                    <button class="btn btn-primary" disabled="@(rule is null)" @onclick="() => ApplyRule(dep)">تطبيق على كل التعارضات</button>
+                    <div class="wizard-rule-actions">
+                        <button class="btn btn-small btn-outline" @onclick="() => CollapseAll(dep)">طي الكل</button>
+                        <button class="btn btn-small btn-outline" @onclick="() => ExpandAll(dep)">فتح الكل</button>
+                        <button class="btn btn-primary" disabled="@(rule is null)" @onclick="() => ApplyRule(dep)">تطبيق على كل التعارضات</button>
+                    </div>
                 </div>
 
                 @foreach (var row in dep.Rows.Skip(page * PageSize).Take(PageSize))
                 {
-                    <section class="repair-row-card wizard-row @(row.IsEdited ? "edited" : "")">
-                        <div class="repair-row-heading">
+                    var collapsed = IsCollapsed(dep, row);
+                    <section class="repair-row-card wizard-row @(row.IsEdited ? "edited" : "") @(collapsed ? "collapsed" : "")">
+                        <div class="repair-row-heading wizard-row-heading" @onclick="() => ToggleRow(dep, row)">
                             <div>
-                                <span class="panel-step">سجل البيانات @row.RecordNumber</span>
+                                <span class="panel-step"><span class="chevron @(collapsed ? "" : "open")">‹</span> سجل البيانات @row.RecordNumber</span>
                                 <h3>سطر الملف @row.StartLine</h3>
+                                @if (collapsed)
+                                {
+                                    <small class="wizard-row-summary">@string.Join(" · ", row.Issues.Select(i => i.Code).Distinct())</small>
+                                }
                             </div>
-                            <div class="row-actions">
+                            <div class="row-actions" @onclick:stopPropagation="true">
                                 @if (row.IsEdited) { <span class="state-tag state-warning">معدّل</span> }
                                 <span class="state-tag state-danger">@row.Cells.Count / @dep.ExpectedWidth عمود</span>
                                 @if (row.IsEdited) { <button type="button" class="btn btn-small btn-ghost" @onclick="() => ResetRow(dep, row)">تراجع</button> }
                             </div>
                         </div>
-                        <div class="repair-issues">
-                            @foreach (var issue in row.Issues)
-                            {
-                                <div class="repair-issue"><strong>@issue.Code</strong><span>@issue.Message</span></div>
-                            }
-                        </div>
-                        <div class="repair-cells">
-                            @for (var index = 0; index < row.Cells.Count; index++)
-                            {
-                                var cellIndex = index;
-                                var headerName = cellIndex < dep.ExpectedHeaders.Count ? dep.ExpectedHeaders[cellIndex] : $"عمود إضافي #{cellIndex + 1}";
-                                <div class="repair-cell">
-                                    <div class="repair-cell-label"><label>@headerName</label><small>العمود @(cellIndex + 1)</small></div>
-                                    <textarea rows="2" dir="auto" class="text-input repair-cell-input" @bind="row.Cells[cellIndex]" @bind:event="oninput"></textarea>
-                                    <div class="repair-cell-actions">
-                                        @if (cellIndex < row.Cells.Count - 1)
-                                        {
-                                            <button type="button" class="btn btn-small btn-outline" @onclick="() => Merge(dep, row, cellIndex)">دمج مع العمود التالي</button>
-                                        }
-                                        <button type="button" class="btn btn-small btn-outline" @onclick="() => InsertCell(dep, row, cellIndex + 1)">إدراج عمود بعده</button>
-                                        <button type="button" class="btn btn-small btn-ghost" @onclick="() => RemoveCell(dep, row, cellIndex)">حذف العمود</button>
+                        @if (!collapsed)
+                        {
+                            <div class="repair-issues">
+                                @foreach (var issue in row.Issues)
+                                {
+                                    <div class="repair-issue"><strong>@issue.Code</strong><span>@issue.Message</span></div>
+                                }
+                            </div>
+                            <div class="repair-cells">
+                                @for (var index = 0; index < row.Cells.Count; index++)
+                                {
+                                    var cellIndex = index;
+                                    var headerName = cellIndex < dep.ExpectedHeaders.Count ? dep.ExpectedHeaders[cellIndex] : $"عمود إضافي #{cellIndex + 1}";
+                                    <div class="repair-cell">
+                                        <div class="repair-cell-label"><label>@headerName</label><small>العمود @(cellIndex + 1)</small></div>
+                                        <textarea rows="2" dir="auto" class="text-input repair-cell-input" @bind="row.Cells[cellIndex]" @bind:event="oninput"></textarea>
+                                        <div class="repair-cell-actions">
+                                            @if (cellIndex < row.Cells.Count - 1)
+                                            {
+                                                <button type="button" class="btn btn-small btn-outline" @onclick="() => Merge(dep, row, cellIndex)">دمج مع العمود التالي</button>
+                                            }
+                                            <button type="button" class="btn btn-small btn-outline" @onclick="() => InsertCell(dep, row, cellIndex + 1)">إدراج عمود بعده</button>
+                                            <button type="button" class="btn btn-small btn-ghost" @onclick="() => RemoveCell(dep, row, cellIndex)">حذف العمود</button>
+                                        </div>
                                     </div>
-                                </div>
-                            }
-                        </div>
-                        <button type="button" class="btn btn-small btn-outline" @onclick="() => AppendCell(dep, row)">+ إضافة عمود فارغ</button>
+                                }
+                            </div>
+                            <button type="button" class="btn btn-small btn-outline" @onclick="() => AppendCell(dep, row)">+ إضافة عمود فارغ</button>
+                        }
                     </section>
                 }
 
@@ -503,63 +512,44 @@ else
 
     private RenderFragment ReviewSlide => __builder =>
     {
-        var ready = Wizard!.VerifiedCount;
         <section class="panel wizard-department">
             <div class="panel-header">
-                <div><span class="panel-step">REVIEW</span><h2>المراجعة النهائية</h2><p>سيتم تحويل الإدارات التي تم إصلاحها فقط. الباقي يبقى كما هو ويمكنك العودة إليه.</p></div>
+                <div><span class="panel-step">REVIEW</span><h2>المراجعة النهائية</h2><p>تم تحويل @Wizard!.ConvertedCount من @Wizard.Departments.Count إدارة. يمكنك العودة لأي إدارة لم تُنهَ بعد.</p></div>
             </div>
+            @if (!string.IsNullOrEmpty(BrowseError)) { <div class="alert alert-error">@BrowseError</div> }
             <div class="table-scroll">
                 <table class="data-table">
-                    <thead><tr><th>الإدارة</th><th>الحالة</th><th>التعارضات</th><th></th></tr></thead>
+                    <thead><tr><th>الإدارة</th><th>الحالة</th><th>التفاصيل</th><th></th></tr></thead>
                     <tbody>
                     @foreach (var dep in Wizard.Departments)
                     {
                         <tr>
                             <td><strong>@dep.DisplayName</strong><small class="table-sub mono">@dep.Slug</small></td>
                             <td>
-                                @if (dep.State == DepartmentRepairState.Verified) { <span class="state-tag state-success">جاهزة للتحويل</span> }
+                                @if (dep.State == DepartmentRepairState.Converted) { <span class="state-tag state-success">تم التحويل</span> }
                                 else if (dep.State == DepartmentRepairState.HasRemainingConflicts) { <span class="state-tag state-danger">ما زالت بها تعارضات</span> }
+                                else if (dep.State == DepartmentRepairState.Verified) { <span class="state-tag state-warning">جاهزة — لم تُحوَّل</span> }
                                 else { <span class="state-tag state-warning">لم تُنهَ بعد</span> }
                             </td>
-                            <td>@(dep.State == DepartmentRepairState.Verified ? 0 : dep.Rows.Count)</td>
-                            <td><button class="btn btn-small btn-outline" @onclick="() => JumpTo(dep)">فتح</button></td>
+                            <td>@(dep.Result is { } r ? $"{r.RowCount:N0} صف · {r.FilmCount} فيلم" : $"{dep.Rows.Count} تعارض")</td>
+                            <td>
+                                <div class="row-actions">
+                                    @if (dep.Result is { } done)
+                                    {
+                                        <button class="btn btn-small btn-outline" @onclick="() => _statsResult = done">الإحصائيات</button>
+                                        <button class="btn btn-small btn-outline" @onclick="() => Browse(done.OutputDirectory)">استعراض</button>
+                                    }
+                                    else
+                                    {
+                                        <button class="btn btn-small btn-outline" @onclick="() => JumpTo(dep)">فتح</button>
+                                    }
+                                </div>
+                            </td>
                         </tr>
                     }
                     </tbody>
                 </table>
             </div>
-            <div class="form-actions">
-                <button class="btn btn-primary run-button" disabled="@(IsBusy || ready == 0)" @onclick="Complete">
-                    @if (IsBusy) { <span class="spinner"></span><span>جارٍ التحويل...</span> }
-                    else { <span>تحويل الإدارات الجاهزة (@ready)</span> }
-                </button>
-            </div>
-            @OutcomesPanel
         </section>
-    };
-
-    private RenderFragment OutcomesPanel => __builder =>
-    {
-        @if (Outcomes.Count > 0)
-        {
-            <div class="wizard-outcomes">
-                @if (!string.IsNullOrEmpty(BrowseError)) { <div class="alert alert-error">@BrowseError</div> }
-                @foreach (var outcome in Outcomes)
-                {
-                    @if (outcome.Result is { } result)
-                    {
-                        <div class="result-banner success">
-                            <div class="result-banner-icon">✓</div>
-                            <div><strong>@outcome.DisplayName</strong><p>@result.RowCount.ToString("N0") صف · @result.FilmCount فيلم · @result.FieldCount حقل</p></div>
-                            <button class="btn btn-small btn-outline" @onclick="() => Browse(result.OutputDirectory)">استعراض</button>
-                        </div>
-                    }
-                    else
-                    {
-                        <div class="alert alert-error"><strong>@outcome.DisplayName</strong><div>@outcome.Error</div></div>
-                    }
-                }
-            </div>
-        }
     };
 }

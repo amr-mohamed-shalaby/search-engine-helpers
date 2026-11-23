@@ -87,6 +87,7 @@ public sealed class DepartmentRepair
     /// <summary>Call after any edit so a previously verified department is checked again.</summary>
     public void MarkEdited()
     {
+        if (State == DepartmentRepairState.Converted) return;
         if (State == DepartmentRepairState.Verified) State = DepartmentRepairState.Editing;
     }
 
@@ -133,6 +134,8 @@ public sealed class DepartmentRepair
     /// <summary>Forgets every edit and check and goes back to the conflicts as they were first found.</summary>
     public void Reset()
     {
+        if (State == DepartmentRepairState.Converted)
+            throw new InvalidOperationException("A converted department cannot be reverted.");
         DeleteStaging();
         CurrentRequest = OriginalRequest;
         ExpectedHeaders = _initialHeaders;
@@ -153,8 +156,14 @@ public sealed class DepartmentRepair
         if (State != DepartmentRepairState.Verified)
             throw new InvalidOperationException("Only a department whose conflicts are all fixed can be converted.");
         var request = CurrentRequest;
-        return await Task.Run(() => converter.Convert(request, Settings), cancellationToken);
+        var result = await Task.Run(() => converter.Convert(request, Settings), cancellationToken);
+        Result = result;
+        State = DepartmentRepairState.Converted;
+        return result;
     }
+
+    /// <summary>The conversion result once <see cref="ConvertAsync"/> has succeeded.</summary>
+    public DepartmentConversionResult? Result { get; private set; }
 
     private static IReadOnlyList<string> ReadHeaders(string path)
     {
