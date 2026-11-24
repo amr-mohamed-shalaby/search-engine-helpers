@@ -455,3 +455,13 @@ html { scroll-behavior: smooth; }
 .legend li { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .legend-dot { width: 9px; height: 9px; border-radius: 3px; display: inline-block; }
 @media (max-width: 800px) { .stats-charts { grid-template-columns: 1fr; } }
+
+/* Film / barcode analysis */
+.tile-warn { border-color: #f1d9a8 !important; background: #fffaf0; }
+.analysis-ok { color: #12836e; font-size: 10px; margin: 8px 0 0; }
+.analysis-bad { color: #b24a53; font-size: 10px; margin: 8px 0 4px; }
+.analysis-sub { margin-top: 14px !important; }
+.gap-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+.gap-chip { background: #fff0f1; color: #b24a53; border: 1px solid #f3d3d6; border-radius: 12px; padding: 2px 9px; font: 10px Consolas, monospace; }
+.prefix-check { display: flex; gap: 8px; margin-top: 10px; }
+.prefix-check .text-input { max-width: 240px; }

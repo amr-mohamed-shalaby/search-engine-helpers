@@ -72,6 +72,89 @@
                 </div>
             </div>
 
+            <div class="chart-card">
+                <h4>تحليل الأفلام والباركود</h4>
+                @if (_analysisError is not null)
+                {
+                    <p class="field-hint">تعذر تحليل Project_Data.xml: @_analysisError</p>
+                }
+                else if (_analysis is null)
+                {
+                    <p class="field-hint">جارٍ التحليل...</p>
+                }
+                else
+                {
+                    <div class="stats-tiles">
+                        <div class="stats-tile"><strong>@_analysis.NodeCount.ToString("N0", CultureInfo.InvariantCulture)</strong><span>عدد العقد</span></div>
+                        <div class="stats-tile"><strong>@_analysis.FilmCount.ToString("N0", CultureInfo.InvariantCulture)</strong><span>عدد الأفلام</span></div>
+                        <div class="stats-tile"><strong>@_analysis.MaxFilmNumber</strong><span>أعلى رقم فيلم</span></div>
+                        <div class="stats-tile @(_analysis.MissingFilmCount > 0 ? "tile-warn" : "")"><strong>@_analysis.MissingFilmCount</strong><span>أفلام غير موجودة</span></div>
+                    </div>
+                    @if (_analysis.MissingFilms.Count == 0)
+                    {
+                        <p class="analysis-ok">✓ الأفلام من 1 إلى @_analysis.MaxFilmNumber متصلة بدون فجوات.</p>
+                    }
+                    else
+                    {
+                        <p class="field-hint">الأفلام غير الموجودة بين 1 و @_analysis.MaxFilmNumber:</p>
+                        <div class="gap-chips">
+                            @foreach (var gap in _analysis.MissingFilms.Take(MaxGapChips))
+                            {
+                                <span class="gap-chip">@gap</span>
+                            }
+                            @if (_analysis.MissingFilms.Count > MaxGapChips)
+                            {
+                                <span class="field-hint">+ @(_analysis.MissingFilms.Count - MaxGapChips) نطاق آخر</span>
+                            }
+                        </div>
+                    }
+                    @if (_analysis.NonNumericFilmNumbers > 0)
+                    {
+                        <p class="analysis-bad">@_analysis.NonNumericFilmNumbers عقدة رقم الفيلم فيها ليس رقماً صحيحاً.</p>
+                    }
+
+                    @if (_analysis.HasBarcodes)
+                    {
+                        <h4 class="analysis-sub">الباركود (@_analysis.Barcodes.Count)</h4>
+                        @if (_duplicates!.Count == 0)
+                        {
+                            <p class="analysis-ok">✓ لا توجد باركودات مكررة.</p>
+                        }
+                        else
+                        {
+                            <p class="analysis-bad">@_duplicates.Count باركود مكرر، أمثلة:</p>
+                            <ul class="legend">
+                                @foreach (var duplicate in _duplicates.Take(10))
+                                {
+                                    <li><strong dir="ltr">@duplicate.Value</strong><span>أفلام: @string.Join("، ", duplicate.FilmNumbers.Take(8))</span></li>
+                                }
+                            </ul>
+                        }
+                        <div class="prefix-check">
+                            <input class="text-input" dir="ltr" placeholder="بداية الباركود المتوقعة" @bind="_prefix" @bind:event="oninput" />
+                            <button class="btn btn-small btn-outline" disabled="@string.IsNullOrEmpty(_prefix)" @onclick="CheckPrefix">تحقق من البداية</button>
+                        </div>
+                        @if (_prefixMismatches is not null)
+                        {
+                            @if (_prefixMismatches.Count == 0)
+                            {
+                                <p class="analysis-ok">✓ كل الباركودات تبدأ بـ @_checkedPrefix.</p>
+                            }
+                            else
+                            {
+                                <p class="analysis-bad">@_prefixMismatches.Count باركود لا يبدأ بـ @_checkedPrefix، أمثلة:</p>
+                                <ul class="legend">
+                                    @foreach (var entry in _prefixMismatches.Take(10))
+                                    {
+                                        <li><strong dir="ltr">@(entry.Value.Length == 0 ? "(فارغ)" : entry.Value)</strong><span>فيلم @entry.FilmNumber</span></li>
+                                    }
+                                </ul>
+                            }
+                        }
+                    }
+                }
+            </div>
+
             @foreach (var group in Groups.Where(g => g.NeedsReview > 0))
             {
                 <details class="stats-group">
@@ -100,6 +183,35 @@
 
 @code {
     private const int MaxMessages = 50;
+    private const int MaxGapChips = 60;
+
+    private ProjectDataAnalysis? _analysis;
+    private IReadOnlyList<BarcodeDuplicate>? _duplicates;
+    private IReadOnlyList<BarcodeEntry>? _prefixMismatches;
+    private string? _analysisError;
+    private string _prefix = string.Empty;
+    private string _checkedPrefix = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var path = Path.Combine(Result.OutputDirectory, "Project_Data.xml");
+        try
+        {
+            _analysis = await Task.Run(() => ProjectDataAnalyzer.Analyze(path));
+            _duplicates = _analysis.DuplicateBarcodes();
+        }
+        catch (Exception ex)
+        {
+            _analysisError = ex.Message;
+        }
+    }
+
+    private void CheckPrefix()
+    {
+        if (_analysis is null || string.IsNullOrEmpty(_prefix)) return;
+        _checkedPrefix = _prefix;
+        _prefixMismatches = _analysis.BarcodesNotStartingWith(_prefix);
+    }
     private static readonly string[] Palette = ["#16b8a6", "#0d8f82", "#f2b441", "#6c8cd5", "#d46c61", "#8f6cc4", "#9aa5af", "#4bb87a"];
 
     [Parameter, EditorRequired] public DepartmentConversionResult Result { get; set; } = default!;
