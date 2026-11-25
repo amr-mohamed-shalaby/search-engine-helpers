@@ -328,6 +328,7 @@ public sealed class ConflictWizardTests : IDisposable
             "x_data.csv: line 3, column 5: a quote inside an unquoted value was kept as a literal character.",
             "x_data.csv: line 9: quotation mark(s) were removed from 'name'.",
             "x_data.csv: line 4: REVIEW - 1 extra cell(s) were joined into the last column 'num'.",
+            "x_data.csv: line 8: 2 missing cell(s) were padded with empty values (original V1 behavior).",
             "x_data.csv: line 7: REVIEW - PHOTO_PATH \\Scan_Tree\\16\\1\\Film\\1 is used by more than one row. It is written as-is, like V1.",
             "file is not valid UTF-8; it was decoded as Windows-1256 (Arabic). Check that the text looks right.",
             "something else"
@@ -335,6 +336,7 @@ public sealed class ConflictWizardTests : IDisposable
 
         Assert.Equal(2, groups.Single(g => g.Kind == AutoFixKind.Quotes).Count);
         Assert.Equal(1, groups.Single(g => g.Kind == AutoFixKind.ExtraCells).NeedsReview);
+        Assert.Equal(1, groups.Single(g => g.Kind == AutoFixKind.MissingCells).Count);
         Assert.Equal(1, groups.Single(g => g.Kind == AutoFixKind.DuplicatePhotoPath).Count);
         Assert.Equal(1, groups.Single(g => g.Kind == AutoFixKind.Encoding).Count);
         Assert.Equal(1, groups.Single(g => g.Kind == AutoFixKind.Other).Count);

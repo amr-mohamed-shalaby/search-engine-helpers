@@ -146,7 +146,7 @@ The existing stored `value` is authoritative. The application does not regenerat
 
 ## `conversion-settings.json`
 
-The settings file is created beside `names.json` after the user saves settings. If it does not exist, the application uses the V1-compatible defaults:
+The settings file is created beside `names.json` after the user saves settings. If it does not exist, the application uses the safer V2 defaults. The original V1 behavior is available as an explicit, opt-in `LegacyTolerantMode`:
 
 ```json
 {
@@ -158,6 +158,7 @@ The settings file is created beside `names.json` after the user saves settings. 
   "TimestampFormat": "MM/dd/yyyy hh:mm:ss tt",
   "EmptyValueMode": "SelfClosingTags",
   "ExtraColumnsMode": "Hold",
+  "LegacyTolerantMode": false,
   "RejectDuplicatePhotoPaths": false,
   "QuoteHandling": "Keep",
   "ValidateNotNull": false,
@@ -176,15 +177,16 @@ Empty values default to the self-closing form `<field/>`, which is what V1 wrote
 
 ### Messy data: what V1 did, and the settings that control it
 
-Real V1 output shows that V1 split each line on commas, kept the first N cells, and deleted every `"` character. Those two behaviors lose data silently, so V2 does not do them unless asked:
+The recovered V1 converter removed every `"` character from the data file before parsing it, dropped cells beyond the header width, and filled missing cells with empty strings. It also wrote non-numeric system identifiers, ignored `FieldSize` and `NotNull`, and fell back to type code `1` for an unknown field type. These choices can silently lose or misplace data, so the safer V2 defaults do not do them:
 
 | Setting | Default | Options |
 |---|---|---|
-| `ExtraColumnsMode` (row has more cells than the header, usually a comma typed in text) | `Hold` - the row is held back as a conflict | `MergeIntoLastColumn` joins the extra cells into the last column; `DropExtra` drops them like V1 |
-| `QuoteHandling` (a `"` inside a value, e.g. `Ringer"s`) | `Keep` | `Remove` deletes quotation marks like V1 |
-| `RejectDuplicatePhotoPaths` (several rows with the same FilmType, FilmId and PortfolioId) | `false` - written as in V1 and reported | `true` holds such rows back |
+| `LegacyTolerantMode` | `false` | `true` enables the original V1 row pipeline: remove all quotes before parsing, drop extra cells, pad missing cells, accept non-numeric system identifiers, ignore `FieldSize`/`NotNull`, and map unknown field types to `NVARCHAR=1` |
+| `ExtraColumnsMode` (row has more cells than the header) | `Hold` | `MergeIntoLastColumn` joins extras; `DropExtra` drops them |
+| `QuoteHandling` (a `"` inside a value, e.g. `Ringer"s`) | `Keep` | `Remove` deletes quotes after parsing; `LegacyTolerantMode` removes them before parsing, which can split quoted commas |
+| `RejectDuplicatePhotoPaths` (several rows with the same FilmType, FilmId and PortfolioId) | `false` - written as in V1 and reported | `true` holds such rows back outside legacy mode |
 
-Every change is listed with file and line in the conversion report (`AutoFixes`); entries marked `REVIEW` deserve a look. `ConversionSettings.V1Compatible()` selects `DropExtra` and `Remove`; the golden test uses it.
+Every detected row adjustment is listed with file and line in the conversion report (`AutoFixes`); entries marked `REVIEW` deserve a look. `ConversionSettings.V1Compatible()` enables `LegacyTolerantMode`. The data and fields headers, XML tag safety, and `ListValues` syntax are still checked; this profile reproduces V1's forgiving data-row behavior, not every undocumented parser edge case.
 
 ## Tests
 

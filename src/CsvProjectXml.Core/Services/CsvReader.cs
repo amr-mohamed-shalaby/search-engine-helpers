@@ -36,7 +36,11 @@ public static class CsvReader
     /// Use it for a last column that holds free-form text such as a JSON list with unquoted commas.
     /// -1 (default) disables it.
     /// </param>
-    public static IEnumerable<CsvRecord> Read(string path, int rawTailColumn = -1)
+    /// <param name="removeQuoteCharacters">
+    /// Removes every double quote before parsing. This intentionally reproduces the original V1 converter's
+    /// lossy data-file behavior; leave false for normal CSV handling.
+    /// </param>
+    public static IEnumerable<CsvRecord> Read(string path, int rawTailColumn = -1, bool removeQuoteCharacters = false)
     {
         var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read,
             bufferSize: 64 * 1024, FileOptions.SequentialScan);
@@ -44,17 +48,52 @@ public static class CsvReader
         try
         {
             var fileNotes = new List<string>();
+            if (removeQuoteCharacters)
+                fileNotes.Add("all double-quote characters were removed before CSV parsing (original V1 behavior).");
             var (encoding, bomLength) = DetectEncoding(stream, fileNotes);
             stream.Position = bomLength;
             using var reader = new StreamReader(stream, encoding,
                 detectEncodingFromByteOrderMarks: false, bufferSize: 64 * 1024, leaveOpen: false);
+            TextReader parseReader = removeQuoteCharacters ? new QuoteRemovingTextReader(reader) : reader;
 
-            foreach (var record in Parse(reader, fileNotes, rawTailColumn))
+            foreach (var record in Parse(parseReader, fileNotes, rawTailColumn))
                 yield return record;
         }
         finally
         {
             stream.Dispose();
+        }
+    }
+
+    /// <summary>Filters every double quote before CSV parsing, as the original V1 converter did.</summary>
+    private sealed class QuoteRemovingTextReader(TextReader inner) : TextReader
+    {
+        private int _peeked = -2;
+
+        public override int Read()
+        {
+            if (_peeked != -2)
+            {
+                var value = _peeked;
+                _peeked = -2;
+                return value;
+            }
+
+            return ReadNonQuote();
+        }
+
+        public override int Peek()
+        {
+            if (_peeked == -2) _peeked = ReadNonQuote();
+            return _peeked;
+        }
+
+        private int ReadNonQuote()
+        {
+            int value;
+            do value = inner.Read();
+            while (value == '"');
+            return value;
         }
     }
 

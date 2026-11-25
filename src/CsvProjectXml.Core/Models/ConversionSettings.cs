@@ -56,6 +56,13 @@ public sealed class ConversionSettings
     public ExtraColumnsMode ExtraColumnsMode { get; set; } = ExtraColumnsMode.Hold;
 
     /// <summary>
+    /// Reproduces the original converter's forgiving data-row behavior: remove all double quotes before parsing,
+    /// drop excess cells, pad missing cells with empty strings, and do not reject non-numeric system identifiers
+    /// or values longer than FieldSize. This can be lossy; every structural adjustment is reported.
+    /// </summary>
+    public bool LegacyTolerantMode { get; set; }
+
+    /// <summary>
     /// V1 wrote several rows that share the same PHOTO_PATH (FilmType, FilmId, PortfolioId). By default that is
     /// reported for review but not blocked; set to true to hold such rows back.
     /// </summary>
@@ -74,13 +81,17 @@ public sealed class ConversionSettings
     public bool ValidateFieldSize { get; set; } = true;
     public List<string> EnabledFeatureIds { get; set; } = [];
     /// <summary>
-    /// Reproduces V1's observable behavior on messy data: extra cells are dropped and quotation marks are removed
-    /// from values. Used to verify byte-for-byte compatibility against real V1 output.
+    /// Reproduces the original V1 converter's forgiving data-row behavior. This is intentionally lossy and
+    /// should be selected only when matching the old executable is more important than preserving malformed input.
     /// </summary>
     public static ConversionSettings V1Compatible() => new()
     {
+        LegacyTolerantMode = true,
         ExtraColumnsMode = ExtraColumnsMode.DropExtra,
-        QuoteHandling = QuoteHandling.Remove
+        QuoteHandling = QuoteHandling.Remove,
+        ValidateFieldSize = false,
+        UnmappedFieldTypeAsText = true,
+        RejectDuplicatePhotoPaths = false
     };
 
     public Dictionary<string, int> FieldTypeMap { get; set; } = new(StringComparer.OrdinalIgnoreCase)

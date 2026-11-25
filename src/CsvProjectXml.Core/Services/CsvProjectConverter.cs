@@ -42,7 +42,8 @@ public sealed class CsvProjectConverter
         var autoFixes = new List<string>();
         var fields = ReadFields(request.FieldsCsvPath, settings, autoFixes);
         var expected = DataFixedHeader.Concat(fields.Select(x => x.FieldName)).ToArray();
-        using var enumerator = ReadCsvRecords(request.DataCsvPath, autoFixes).GetEnumerator();
+        using var enumerator = ReadCsvRecords(request.DataCsvPath, autoFixes,
+            removeQuoteCharacters: settings.LegacyTolerantMode).GetEnumerator();
         if (!enumerator.MoveNext())
             throw new ConversionException("The data CSV is empty.", request.DataCsvPath, 1, "Header");
         ValidateExactHeader(enumerator.Current, expected, request.DataCsvPath, "Data CSV");
@@ -74,15 +75,18 @@ public sealed class CsvProjectConverter
                 long? filmType = TryParseNonNegative(values[2], out var parsedFilmType) ? parsedFilmType : null;
                 long? portfolioId = TryParseNonNegative(values[3], out var parsedPortfolioId) ? parsedPortfolioId : null;
 
-                if (filmId is null) Add("INVALID_FILM_ID", $"'{values[1]}' is not a non-negative integer.", "FilmId");
-                if (filmType is null) Add("INVALID_FILM_TYPE", $"'{values[2]}' is not a non-negative integer.", "FilmType");
-                if (portfolioId is null) Add("INVALID_PORTFOLIO_ID", $"'{values[3]}' is not a non-negative integer.", "PortfolioId");
+                if (!settings.LegacyTolerantMode)
+                {
+                    if (filmId is null) Add("INVALID_FILM_ID", $"'{values[1]}' is not a non-negative integer.", "FilmId");
+                    if (filmType is null) Add("INVALID_FILM_TYPE", $"'{values[2]}' is not a non-negative integer.", "FilmType");
+                    if (portfolioId is null) Add("INVALID_PORTFOLIO_ID", $"'{values[3]}' is not a non-negative integer.", "PortfolioId");
+                }
 
                 if (filmId is not null && filmType is not null && portfolioId is not null
                     && !photoPaths.Add((filmType.Value, filmId.Value, portfolioId.Value)))
                 {
                     var message = $"PHOTO_PATH \\Scan_Tree\\{values[2]}\\{values[1]}\\Film\\{values[3]} is used by more than one row.";
-                    if (settings.RejectDuplicatePhotoPaths) Add("DUPLICATE_PHOTO_PATH", message, "FilmId/PortfolioId");
+                    if (settings.RejectDuplicatePhotoPaths && !settings.LegacyTolerantMode) Add("DUPLICATE_PHOTO_PATH", message, "FilmId/PortfolioId");
                     else autoFixes.Add($"{Path.GetFileName(request.DataCsvPath)}: line {row.StartLine}: REVIEW - {message} It is written as-is, like V1.");
                 }
 
@@ -109,9 +113,9 @@ public sealed class CsvProjectConverter
                         Add("TRANSFORM_FAILED", ex.Message, field.FieldName);
                     }
 
-                    if (settings.ValidateFieldSize && value.Length > field.FieldSize)
+                    if (settings.ValidateFieldSize && !settings.LegacyTolerantMode && value.Length > field.FieldSize)
                         Add("FIELD_SIZE", $"Value length {value.Length} exceeds FieldSize {field.FieldSize}.", field.FieldName);
-                    if (settings.ValidateNotNull && field.NotNull && value.Length == 0)
+                    if (settings.ValidateNotNull && !settings.LegacyTolerantMode && field.NotNull && value.Length == 0)
                         Add("REQUIRED_VALUE", "The field is marked NotNull but the value is empty.", field.FieldName);
                     ValidateXmlValue(value, field.FieldName, Add);
                 }
@@ -228,7 +232,7 @@ public sealed class CsvProjectConverter
             var fieldType = row.Values[3].Trim().ToUpperInvariant();
             var fieldSize = ParseInt(row.Values[4], path, row.StartLine, "FieldSize");
             var notNull = false;
-            if (settings.ValidateNotNull && !bool.TryParse(row.Values[5], out notNull))
+            if (settings.ValidateNotNull && !settings.LegacyTolerantMode && !bool.TryParse(row.Values[5], out notNull))
                 throw new ConversionException($"'{row.Values[5]}' is not a valid boolean (True or False).",
                     path, row.StartLine, "NotNull");
             var listValues = row.Values[6];
@@ -239,7 +243,7 @@ public sealed class CsvProjectConverter
             if (new[] { "FILM_NUMBER", "FILM_TYPE", "PHOTO_PATH" }.Contains(fieldName, StringComparer.OrdinalIgnoreCase))
                 throw new ConversionException($"'{fieldName}' conflicts with a system field name.",
                     path, row.StartLine, "FieldName");
-            if (names.TryGetValue(fieldName, out var firstLine))
+            if (!settings.LegacyTolerantMode && names.TryGetValue(fieldName, out var firstLine))
             {
                 var first = definitions.First(x => string.Equals(x.FieldName, fieldName, StringComparison.Ordinal));
                 // A repeated row that adds nothing (same type, no Arabic name of its own) is a leftover line in the
@@ -252,7 +256,7 @@ public sealed class CsvProjectConverter
                 }
             }
 
-            if (!names.TryAdd(fieldName, row.StartLine))
+            if (!names.TryAdd(fieldName, row.StartLine) && !settings.LegacyTolerantMode)
                 throw new ConversionException(
                     $"Duplicate FieldName '{fieldName}' (first used on line {names[fieldName]}). Each field needs a unique name; rename one of them in the fields file and in the data file header.",
                     path, row.StartLine, "FieldName");
@@ -264,7 +268,7 @@ public sealed class CsvProjectConverter
             var typeMatch = typeMap.FirstOrDefault(x => string.Equals(x.Key, fieldType, StringComparison.OrdinalIgnoreCase));
             if (typeMatch.Key is null && BuiltInFieldTypes.TryGetValue(fieldType, out var builtInCode))
                 typeMatch = new KeyValuePair<string, int>(fieldType, builtInCode);
-            if (typeMatch.Key is null && settings.UnmappedFieldTypeAsText)
+            if (typeMatch.Key is null && (settings.UnmappedFieldTypeAsText || settings.LegacyTolerantMode))
             {
                 typeMatch = new KeyValuePair<string, int>(fieldType, BuiltInFieldTypes["NVARCHAR"]);
                 autoFixes?.Add($"REVIEW: {Path.GetFileName(path)} line {row.StartLine}: FieldType '{fieldType}' of field '{fieldName}' is not mapped; it was written as NVARCHAR ({typeMatch.Value}).");
@@ -285,7 +289,8 @@ public sealed class CsvProjectConverter
     private (long RowCount, int FilmCount) WriteDataXml(string outputPath, string csvPath,
         IReadOnlyList<FieldDefinition> fields, ConversionSettings settings, List<string>? autoFixes = null)
     {
-        using var enumerator = ReadCsvRecords(csvPath, autoFixes).GetEnumerator();
+        using var enumerator = ReadCsvRecords(csvPath, autoFixes,
+            removeQuoteCharacters: settings.LegacyTolerantMode).GetEnumerator();
         if (!enumerator.MoveNext())
             throw new ConversionException("The data CSV is empty.", csvPath, 1, "Header");
 
@@ -298,7 +303,7 @@ public sealed class CsvProjectConverter
         writer.WriteLine("<DocumentElement>");
 
         long rowCount = 0;
-        var films = new HashSet<long>();
+        var films = new HashSet<string>(StringComparer.Ordinal);
         var photoPaths = new HashSet<(long FilmType, long FilmId, long PortfolioId)>();
 
         while (enumerator.MoveNext())
@@ -310,18 +315,30 @@ public sealed class CsvProjectConverter
             var filmIdRaw = values[1];
             var filmTypeRaw = values[2];
             var portfolioRaw = values[3];
-            var filmId = ParseNonNegativeLong(filmIdRaw, csvPath, row.StartLine, "FilmId");
-            var filmType = ParseNonNegativeLong(filmTypeRaw, csvPath, row.StartLine, "FilmType");
-            var portfolioId = ParseNonNegativeLong(portfolioRaw, csvPath, row.StartLine, "PortfolioId");
+            var filmIdValid = TryParseNonNegative(filmIdRaw, out var parsedFilmId);
+            var filmTypeValid = TryParseNonNegative(filmTypeRaw, out var parsedFilmType);
+            var portfolioValid = TryParseNonNegative(portfolioRaw, out var parsedPortfolioId);
+            if (!settings.LegacyTolerantMode && (!filmIdValid || !filmTypeValid || !portfolioValid))
+            {
+                var column = !filmIdValid ? "FilmId" : !filmTypeValid ? "FilmType" : "PortfolioId";
+                var raw = !filmIdValid ? filmIdRaw : !filmTypeValid ? filmTypeRaw : portfolioRaw;
+                throw new ConversionException($"'{raw}' is not a non-negative integer.", csvPath, row.StartLine, column);
+            }
 
-            if (!photoPaths.Add((filmType, filmId, portfolioId)))
+            var filmId = filmIdValid ? parsedFilmId : 0;
+            var filmType = filmTypeValid ? parsedFilmType : 0;
+            var portfolioId = portfolioValid ? parsedPortfolioId : 0;
+
+            if (filmIdValid && filmTypeValid && portfolioValid && !photoPaths.Add((filmType, filmId, portfolioId)))
             {
                 var message = $"PHOTO_PATH \\Scan_Tree\\{filmTypeRaw}\\{filmIdRaw}\\Film\\{portfolioRaw} is used by more than one row.";
-                if (settings.RejectDuplicatePhotoPaths)
+                if (settings.RejectDuplicatePhotoPaths && !settings.LegacyTolerantMode)
                     throw new ConversionException(message, csvPath, row.StartLine, "FilmId/PortfolioId");
                 autoFixes?.Add($"{Path.GetFileName(csvPath)}: line {row.StartLine}: REVIEW - {message} It is written as-is, like V1.");
             }
-            films.Add(filmId);
+            films.Add(settings.LegacyTolerantMode
+                ? filmIdRaw
+                : filmId.ToString(CultureInfo.InvariantCulture));
 
             writer.WriteLine("\t<Data>");
             WriteDataTag(writer, "FILM_NUMBER", filmIdRaw, csvPath, row.StartLine, "FilmId", settings);
@@ -339,10 +356,10 @@ public sealed class CsvProjectConverter
                     if ((settings.EnabledFeatureIds ?? []).Contains(feature.Id, StringComparer.OrdinalIgnoreCase))
                         value = feature.Transform(value, field, rowContext);
                 }
-                if (settings.ValidateFieldSize && value.Length > field.FieldSize)
+                if (settings.ValidateFieldSize && !settings.LegacyTolerantMode && value.Length > field.FieldSize)
                     throw new ConversionException($"Value length {value.Length} exceeds FieldSize {field.FieldSize}.",
                         csvPath, row.StartLine, field.FieldName);
-                if (settings.ValidateNotNull && field.NotNull && value.Length == 0)
+                if (settings.ValidateNotNull && !settings.LegacyTolerantMode && field.NotNull && value.Length == 0)
                     throw new ConversionException("The field is marked NotNull but the value is empty.",
                         csvPath, row.StartLine, field.FieldName);
                 WriteDataTag(writer, field.FieldName, value, csvPath, row.StartLine, field.FieldName, settings);
@@ -368,7 +385,14 @@ public sealed class CsvProjectConverter
         var width = columns.Count;
         var file = Path.GetFileName(path);
 
-        if (values.Count > width && settings.ExtraColumnsMode != ExtraColumnsMode.Hold)
+        if (settings.LegacyTolerantMode && values.Count > width)
+        {
+            var extra = values.Count - width;
+            var dropped = string.Join(",", values.Skip(width));
+            values = values.Take(width).ToArray();
+            autoFixes?.Add($"{file}: line {row.StartLine}: REVIEW - {extra} extra cell(s) were dropped (original V1 behavior); dropped text: {dropped}");
+        }
+        else if (values.Count > width && settings.ExtraColumnsMode != ExtraColumnsMode.Hold)
         {
             var extra = values.Count - width;
             if (settings.ExtraColumnsMode == ExtraColumnsMode.MergeIntoLastColumn)
@@ -384,10 +408,18 @@ public sealed class CsvProjectConverter
             }
         }
 
+        if (settings.LegacyTolerantMode && values.Count < width)
+        {
+            var missing = width - values.Count;
+            values = values.Concat(Enumerable.Repeat(string.Empty, missing)).ToArray();
+            autoFixes?.Add($"{file}: line {row.StartLine}: {missing} missing cell(s) were padded with empty values (original V1 behavior).");
+        }
+
         if (settings.QuoteHandling == QuoteHandling.Remove && values.Count == width)
         {
             List<string>? changed = null;
-            for (var index = DataFixedHeader.Length; index < values.Count; index++)
+            var firstValueColumn = settings.LegacyTolerantMode ? 0 : DataFixedHeader.Length;
+            for (var index = firstValueColumn; index < values.Count; index++)
             {
                 if (!values[index].Contains('"')) continue;
                 changed ??= values.ToList();
@@ -552,10 +584,11 @@ public sealed class CsvProjectConverter
         writer.WriteLine($"{new string('\t', indent)}<{name}>{escaped}</{name}>");
     }
 
-    private static IEnumerable<CsvRecord> ReadCsvRecords(string path, List<string>? autoFixes = null, int rawTailColumn = -1)
+    private static IEnumerable<CsvRecord> ReadCsvRecords(string path, List<string>? autoFixes = null,
+        int rawTailColumn = -1, bool removeQuoteCharacters = false)
     {
         var fileName = Path.GetFileName(path);
-        using var enumerator = CsvReader.Read(path, rawTailColumn).GetEnumerator();
+        using var enumerator = CsvReader.Read(path, rawTailColumn, removeQuoteCharacters).GetEnumerator();
         while (true)
         {
             bool hasNext;

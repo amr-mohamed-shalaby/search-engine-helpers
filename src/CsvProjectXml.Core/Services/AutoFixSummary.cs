@@ -4,6 +4,7 @@ public enum AutoFixKind
 {
     DuplicatePhotoPath,
     ExtraCells,
+    MissingCells,
     Quotes,
     Encoding,
     Delimiter,
@@ -35,6 +36,8 @@ public static class AutoFixSummary
     {
         if (note.Contains("PHOTO_PATH", StringComparison.Ordinal)) return AutoFixKind.DuplicatePhotoPath;
         if (note.Contains("extra cell", StringComparison.OrdinalIgnoreCase)) return AutoFixKind.ExtraCells;
+        if (note.Contains("missing cell", StringComparison.OrdinalIgnoreCase) ||
+            note.Contains("padded with empty", StringComparison.OrdinalIgnoreCase)) return AutoFixKind.MissingCells;
         if (note.Contains("quot", StringComparison.OrdinalIgnoreCase)) return AutoFixKind.Quotes;
         if (note.Contains("encoding", StringComparison.OrdinalIgnoreCase) ||
             note.Contains("decoded", StringComparison.OrdinalIgnoreCase)) return AutoFixKind.Encoding;

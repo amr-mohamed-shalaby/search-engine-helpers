@@ -23,8 +23,9 @@
 
 ## Deliberate validation additions
 
-- Exact CSV headers and row widths are checked.
-- Unknown field types, duplicate custom field names, system-field name collisions, duplicate `(FilmId, PortfolioId)` pairs, invalid XML 1.0 characters, and values beyond `FieldSize` fail the department.
+- Exact CSV headers and (outside `LegacyTolerantMode`) row widths are checked.
+- In the safer default mode, unknown field types, duplicate custom field names, system-field name collisions, invalid system identifiers, invalid XML 1.0 characters, and values beyond `FieldSize` can fail or hold back the department.
+- `LegacyTolerantMode` restores V1's forgiving data-row behavior: quote removal before parsing, excess-cell dropping, missing-cell padding, no numeric system-ID or `FieldSize` rejection, unknown field-type fallback to code `1`, and no duplicate-field-name or duplicate-photo-path blocking. Structural headers and XML 1.0 validity remain checked.
 - Non-empty `ListValues` fails because the target lookup XML schema is unknown.
 - `NotNull` is ignored by default like V1; optional validation parses and enforces it.
 
@@ -41,7 +42,7 @@ The byte-for-byte golden test is implemented and is conditionally skipped until 
 5. ~~Empty values~~ - V1 writes self-closing `<field/>`; this is now the default.
 6. `NVARCHAR=1` and `LIST=5` are confirmed. Confirm codes for every other target type (for example `DATE`).
 7. ~~Non-empty `ListValues`~~ - implemented from real V1 output (reverse field order, reverse item order, `FIELD_LOOKUP_ORDER` = position in the reversed sequence).
-7a. V1 dropped extra cells and deleted quotation marks; both are now opt-in settings (`ExtraColumnsMode`, `QuoteHandling`).
+7a. V1 removed quotes before parsing, dropped excess cells, and padded missing cells; these lossy behaviors are now available through the opt-in `LegacyTolerantMode` profile.
 8. `FilmType` is copied from the data CSV and validated as a non-negative integer; no master mapping is assumed.
 9. `NotNull` validation remains off by default.
 10. Arabic output folder naming is opt-in; confirm whether it should become the default.

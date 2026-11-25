@@ -125,7 +125,7 @@ public sealed class V1CompatibilityTests : IDisposable
     }
 
     [Fact]
-    public void MissingCellsAreStillHeldBackInEveryMode()
+    public void V1CompatiblePadsMissingCellsInsteadOfCreatingAConflict()
     {
         var (fieldsPath, dataPath) = Write(
             FieldsHeader + "1,area,المنطقة,NVARCHAR,200,False,\r\n2,num,الرقم,NVARCHAR,200,False,\r\n",
@@ -134,7 +134,41 @@ public sealed class V1CompatibilityTests : IDisposable
 
         var preflight = new CsvProjectConverter().Validate(Request(fieldsPath, dataPath), settings);
 
-        Assert.Contains(Assert.Single(preflight.Conflicts).Issues, issue => issue.Code == "COLUMN_COUNT");
+        Assert.False(preflight.HasConflicts);
+        Assert.Contains(preflight.AutoFixes!, fix => fix.Contains("padded with empty values", StringComparison.Ordinal));
+        var result = Convert(fieldsPath, dataPath, settings, Path.Combine(_root, "padded"));
+        var xml = File.ReadAllText(Path.Combine(result.OutputDirectory, "Project_Data.xml"), Encoding.UTF8);
+        Assert.Contains("<area>محافظه قنا</area>", xml);
+        Assert.Contains("<num/>", xml);
+    }
+
+    [Fact]
+    public void V1CompatibleModeReproducesTheOriginalForgivingDataRowPipeline()
+    {
+        var (fieldsPath, dataPath) = Write(
+            FieldsHeader + "1,name,الاسم,DATE,1,True,\r\n",
+            "ID,FilmId,FilmType,PortfolioId,name\r\n" +
+            "1,not-a-number,16,1,\"Quoted, comma\",extra\r\n" +
+            "2,2,16,2\r\n" +
+            "3,3,16,3,this value is longer than FieldSize\r\n");
+        var settings = ConversionSettings.V1Compatible();
+        var converter = new CsvProjectConverter();
+
+        var preflight = converter.Validate(Request(fieldsPath, dataPath), settings);
+        Assert.False(preflight.HasConflicts);
+
+        var result = Convert(fieldsPath, dataPath, settings, Path.Combine(_root, "legacy-tolerant"));
+        var xml = File.ReadAllText(Path.Combine(result.OutputDirectory, "Project_Data.xml"), Encoding.UTF8);
+        var fieldsXml = File.ReadAllText(Path.Combine(result.OutputDirectory, "Project_Fields.xml"), Encoding.UTF8);
+
+        Assert.Equal(3, result.RowCount);
+        Assert.Contains("<FILM_NUMBER>not-a-number</FILM_NUMBER>", xml);
+        Assert.Contains("<name>Quoted</name>", xml); // V1 removed quotes before CSV parsing, then trimmed excess cells.
+        Assert.Contains("<name/>", xml);             // V1 padded missing cells with an empty string.
+        Assert.Contains("<name>this value is longer than FieldSize</name>", xml);
+        Assert.Contains("<FIELD_TYPE>1</FIELD_TYPE>", fieldsXml); // Unknown V1 field types fell back to NVARCHAR.
+        Assert.Contains(result.AutoFixes!, fix => fix.Contains("dropped text", StringComparison.Ordinal));
+        Assert.Contains(result.AutoFixes!, fix => fix.Contains("padded with empty values", StringComparison.Ordinal));
     }
 
     // ---------------------------------------------------------------- quotation marks
