@@ -26,3 +26,7 @@ coverage/
 conversion-settings.json
 *.staging-*/
 *.backup-*/
+
+
+/installer/
+artifacts/publish/
