@@ -177,7 +177,7 @@ Empty values default to the self-closing form `<field/>`, which is what V1 wrote
 
 ### Messy data: what V1 did, and the settings that control it
 
-The recovered V1 converter removed every `"` character from the data file before parsing it, dropped cells beyond the header width, and filled missing cells with empty strings. It also wrote non-numeric system identifiers, ignored `FieldSize` and `NotNull`, and fell back to type code `1` for an unknown field type. These choices can silently lose or misplace data, so the safer V2 defaults do not do them:
+The recovered V1 converter removed every `"` character from the data file before parsing it, mapped data by the actual header names, omitted XML elements for expected fields whose headers were absent, dropped cells beyond the actual header width, and filled missing row cells with empty strings. It also wrote non-numeric system identifiers, ignored `FieldSize` and `NotNull`, and fell back to type code `1` for an unknown field type. These choices can silently lose or misplace data, so the safer V2 defaults do not do them:
 
 | Setting | Default | Options |
 |---|---|---|
@@ -186,7 +186,7 @@ The recovered V1 converter removed every `"` character from the data file before
 | `QuoteHandling` (a `"` inside a value, e.g. `Ringer"s`) | `Keep` | `Remove` deletes quotes after parsing; `LegacyTolerantMode` removes them before parsing, which can split quoted commas |
 | `RejectDuplicatePhotoPaths` (several rows with the same FilmType, FilmId and PortfolioId) | `false` - written as in V1 and reported | `true` holds such rows back outside legacy mode |
 
-Every detected row adjustment is listed with file and line in the conversion report (`AutoFixes`); entries marked `REVIEW` deserve a look. `ConversionSettings.V1Compatible()` enables `LegacyTolerantMode`. The data and fields headers, XML tag safety, and `ListValues` syntax are still checked; this profile reproduces V1's forgiving data-row behavior, not every undocumented parser edge case.
+Every detected row adjustment is listed with file and line in the conversion report (`AutoFixes`); entries marked `REVIEW` deserve a look. `ConversionSettings.V1Compatible()` enables `LegacyTolerantMode`. The fields-definition header, duplicate/empty data headers, XML tag safety, and `ListValues` syntax are still checked; data columns are mapped by their actual header names and missing expected headers are reported while their XML elements are omitted, as in V1.
 
 ## Tests
 

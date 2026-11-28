@@ -25,7 +25,7 @@
 
 - Exact CSV headers and (outside `LegacyTolerantMode`) row widths are checked.
 - In the safer default mode, unknown field types, duplicate custom field names, system-field name collisions, invalid system identifiers, invalid XML 1.0 characters, and values beyond `FieldSize` can fail or hold back the department.
-- `LegacyTolerantMode` restores V1's forgiving data-row behavior: quote removal before parsing, excess-cell dropping, missing-cell padding, no numeric system-ID or `FieldSize` rejection, unknown field-type fallback to code `1`, and no duplicate-field-name or duplicate-photo-path blocking. Structural headers and XML 1.0 validity remain checked.
+- `LegacyTolerantMode` restores V1's forgiving data pipeline: quote removal before parsing, header-name-based column mapping, omitted XML elements for absent data headers, excess-cell dropping, missing-cell padding, no numeric system-ID or `FieldSize` rejection, unknown field-type fallback to code `1`, and no duplicate-field-name or duplicate-photo-path blocking. The fields-definition header and XML 1.0 validity remain checked; duplicate or empty data headers remain errors.
 - Non-empty `ListValues` fails because the target lookup XML schema is unknown.
 - `NotNull` is ignored by default like V1; optional validation parses and enforces it.
 

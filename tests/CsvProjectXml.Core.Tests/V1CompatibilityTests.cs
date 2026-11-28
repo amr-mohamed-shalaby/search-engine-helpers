@@ -143,6 +143,40 @@ public sealed class V1CompatibilityTests : IDisposable
     }
 
     [Fact]
+    public void V1CompatibleModeMapsByHeaderNameAndOmitsMissingDataFieldsLikeV1()
+    {
+        var (fieldsPath, dataPath) = Write(
+            FieldsHeader +
+            "1,name,الاسم,NVARCHAR,200,False,\r\n" +
+            "2,alanwan,العنوان,NVARCHAR,200,False,\r\n",
+            // FilmType and FilmId are deliberately reordered; alanwan is absent.
+            "ID,FilmType,FilmId,PortfolioId,name\r\n" +
+            "1,16,9,3,hello\r\n");
+        var settings = ConversionSettings.V1Compatible();
+        var converter = new CsvProjectConverter();
+
+        var preflight = converter.Validate(Request(fieldsPath, dataPath), settings);
+        Assert.False(preflight.HasConflicts);
+        Assert.Contains(preflight.AutoFixes!, fix =>
+            fix.Contains("data column 'alanwan' is absent", StringComparison.Ordinal));
+
+        var result = Convert(fieldsPath, dataPath, settings, Path.Combine(_root, "missing-header"));
+        var xml = File.ReadAllText(Path.Combine(result.OutputDirectory, "Project_Data.xml"), Encoding.UTF8);
+        var fieldsXml = File.ReadAllText(Path.Combine(result.OutputDirectory, "Project_Fields.xml"), Encoding.UTF8);
+
+        Assert.Contains("<FILM_NUMBER>9</FILM_NUMBER>", xml);
+        Assert.Contains("<FILM_TYPE>16</FILM_TYPE>", xml);
+        Assert.Contains("<PHOTO_PATH>\\Scan_Tree\\16\\9\\Film\\3</PHOTO_PATH>", xml);
+        Assert.Contains("<name>hello</name>", xml);
+        Assert.DoesNotContain("<alanwan", xml);
+        Assert.Contains("<FIELD_NAME_ENG>alanwan</FIELD_NAME_ENG>", fieldsXml);
+
+        var strict = Assert.Throws<ConversionException>(() =>
+            converter.Validate(Request(fieldsPath, dataPath), new ConversionSettings()));
+        Assert.Contains("header has", strict.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void V1CompatibleModeReproducesTheOriginalForgivingDataRowPipeline()
     {
         var (fieldsPath, dataPath) = Write(

@@ -29,8 +29,8 @@ public sealed class CsvProjectConverter
 
     /// <summary>
     /// Validates the complete data CSV and returns all row-level conflicts without writing XML.
-    /// Structural errors in the fields CSV or data header still fail immediately because the
-    /// application cannot reliably identify the data columns in those cases.
+    /// Strict mode requires an exact data header. Legacy-tolerant mode follows V1's
+    /// header-keyed mapping: columns are read by their actual names and absent fields are omitted.
     /// </summary>
     public ConversionPreflightResult Validate(ConversionRequest request, ConversionSettings settings)
     {
@@ -46,7 +46,8 @@ public sealed class CsvProjectConverter
             removeQuoteCharacters: settings.LegacyTolerantMode).GetEnumerator();
         if (!enumerator.MoveNext())
             throw new ConversionException("The data CSV is empty.", request.DataCsvPath, 1, "Header");
-        ValidateExactHeader(enumerator.Current, expected, request.DataCsvPath, "Data CSV");
+        var header = enumerator.Current;
+        var headerMap = BuildDataHeaderMap(header, expected, settings, request.DataCsvPath, autoFixes);
 
         var conflicts = new List<DataRowConflict>();
         var photoPaths = new HashSet<(long FilmType, long FilmId, long PortfolioId)>();
@@ -56,7 +57,8 @@ public sealed class CsvProjectConverter
         {
             var row = enumerator.Current;
             recordNumber++;
-            var rowValues = NormalizeDataRow(row, expected, settings, request.DataCsvPath, autoFixes);
+            var normalized = NormalizeDataRow(row, header.Values, settings, request.DataCsvPath, autoFixes);
+            var rowValues = MapDataRow(normalized, expected, headerMap);
             var issues = new List<RowValidationIssue>();
             void Add(string code, string message, string? column) => issues.Add(new RowValidationIssue(code, message, column));
 
@@ -97,6 +99,7 @@ public sealed class CsvProjectConverter
                 for (var index = 0; index < fields.Count; index++)
                 {
                     var field = fields[index];
+                    if (!headerMap.ContainsKey(field.FieldName)) continue;
                     var value = values[index + DataFixedHeader.Length];
                     var context = new DataRowContext(values[0], filmId ?? 0, filmType ?? 0,
                         portfolioId ?? 0, request.DataCsvPath, row.StartLine);
@@ -296,7 +299,7 @@ public sealed class CsvProjectConverter
 
         var header = enumerator.Current;
         var expected = DataFixedHeader.Concat(fields.Select(x => x.FieldName)).ToArray();
-        ValidateExactHeader(header, expected, csvPath, "Data CSV");
+        var headerMap = BuildDataHeaderMap(header, expected, settings, csvPath, autoFixes);
 
         using var writer = new XmlLineWriter(outputPath);
         writer.WriteLine("<?xml version=\"1.0\" encoding=\"UTF-8\"?>");
@@ -309,9 +312,8 @@ public sealed class CsvProjectConverter
         while (enumerator.MoveNext())
         {
             var row = enumerator.Current;
-            var values = NormalizeDataRow(row, expected, settings, csvPath, autoFixes);
-            if (values.Count != expected.Length)
-                ValidateColumnCount(new CsvRecord(values, row.StartLine), expected.Length, csvPath, expected);
+            var normalized = NormalizeDataRow(row, header.Values, settings, csvPath, autoFixes);
+            var values = MapDataRow(normalized, expected, headerMap);
             var filmIdRaw = values[1];
             var filmTypeRaw = values[2];
             var portfolioRaw = values[3];
@@ -341,14 +343,20 @@ public sealed class CsvProjectConverter
                 : filmId.ToString(CultureInfo.InvariantCulture));
 
             writer.WriteLine("\t<Data>");
-            WriteDataTag(writer, "FILM_NUMBER", filmIdRaw, csvPath, row.StartLine, "FilmId", settings);
-            WriteDataTag(writer, "FILM_TYPE", filmTypeRaw, csvPath, row.StartLine, "FilmType", settings);
-            var photoPath = $"\\Scan_Tree\\{filmTypeRaw}\\{filmIdRaw}\\Film\\{portfolioRaw}";
-            WriteDataTag(writer, "PHOTO_PATH", photoPath, csvPath, row.StartLine, "PortfolioId", settings);
+            if (headerMap.ContainsKey("FilmId"))
+                WriteDataTag(writer, "FILM_NUMBER", filmIdRaw, csvPath, row.StartLine, "FilmId", settings);
+            if (headerMap.ContainsKey("FilmType"))
+                WriteDataTag(writer, "FILM_TYPE", filmTypeRaw, csvPath, row.StartLine, "FilmType", settings);
+            if (headerMap.ContainsKey("PortfolioId"))
+            {
+                var photoPath = $"\\Scan_Tree\\{filmTypeRaw}\\{filmIdRaw}\\Film\\{portfolioRaw}";
+                WriteDataTag(writer, "PHOTO_PATH", photoPath, csvPath, row.StartLine, "PortfolioId", settings);
+            }
 
             for (var index = 0; index < fields.Count; index++)
             {
                 var field = fields[index];
+                if (!headerMap.ContainsKey(field.FieldName)) continue;
                 var value = values[index + DataFixedHeader.Length];
                 var rowContext = new DataRowContext(values[0], filmId, filmType, portfolioId, csvPath, row.StartLine);
                 foreach (var feature in _features)
@@ -372,6 +380,48 @@ public sealed class CsvProjectConverter
         writer.WriteLine("</DocumentElement>");
         writer.Flush();
         return (rowCount, films.Count);
+    }
+
+    private static IReadOnlyDictionary<string, int> BuildDataHeaderMap(CsvRecord header,
+        IReadOnlyList<string> expected, ConversionSettings settings, string path, List<string>? autoFixes)
+    {
+        if (!settings.LegacyTolerantMode)
+        {
+            ValidateExactHeader(header, expected, path, "Data CSV");
+            return expected.Select((name, index) => (name, index))
+                .ToDictionary(item => item.name, item => item.index, StringComparer.Ordinal);
+        }
+
+        var map = new Dictionary<string, int>(StringComparer.Ordinal);
+        for (var index = 0; index < header.Values.Count; index++)
+        {
+            var name = header.Values[index];
+            if (string.IsNullOrWhiteSpace(name))
+                throw new ConversionException("Data CSV contains an empty column header.", path, header.StartLine,
+                    $"#{index + 1}");
+            if (!map.TryAdd(name, index))
+                throw new ConversionException($"Data CSV contains duplicate column header '{name}'.",
+                    path, header.StartLine, name);
+        }
+
+        foreach (var name in expected)
+        {
+            if (map.ContainsKey(name)) continue;
+            autoFixes?.Add($"{Path.GetFileName(path)}: line {header.StartLine}: REVIEW - data column '{name}' is absent; like V1, no XML element will be generated for it.");
+        }
+        return map;
+    }
+
+    private static IReadOnlyList<string> MapDataRow(IReadOnlyList<string> row,
+        IReadOnlyList<string> expected, IReadOnlyDictionary<string, int> headerMap)
+    {
+        var mapped = new string[expected.Count];
+        for (var index = 0; index < expected.Count; index++)
+            if (headerMap.TryGetValue(expected[index], out var sourceIndex) && sourceIndex < row.Count)
+                mapped[index] = row[sourceIndex];
+            else
+                mapped[index] = string.Empty;
+        return mapped;
     }
 
     /// <summary>
