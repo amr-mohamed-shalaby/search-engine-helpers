@@ -1,4 +1,4 @@
-using CsvProjectXml.Core.Services;
+﻿using CsvProjectXml.Core.Services;
 using CsvProjectXml.Maui.Services;
 using Microsoft.Extensions.Logging;
 
@@ -29,6 +29,7 @@ public static class MauiProgram
         builder.Services.AddSingleton<CsvRepairService>();
         builder.Services.AddSingleton<RepairSessionStore>();
         builder.Services.AddSingleton<ConversionPageState>();
+        builder.Services.AddSingleton<ConversionHistoryService>();
         builder.Services.AddSingleton<WorkspaceState>();
         builder.Services.AddSingleton<ConflictWizardState>();
         builder.Services.AddSingleton<IPathPicker, WindowsPathPicker>();

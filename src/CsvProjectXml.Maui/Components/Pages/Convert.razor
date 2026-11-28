@@ -9,6 +9,7 @@
 @inject RepairSessionStore RepairSessions
 @inject ConversionPageState ConversionPage
 @inject NavigationManager Navigation
+@inject ConversionHistoryService ConversionHistory
 @inject IJSRuntime JS
 @inject ConflictWizardState Wizards
 @inject IFolderOpener FolderOpener
@@ -311,6 +312,7 @@
         BatchResult = null;
         PendingRepairSessionId = null;
         ReportPath = string.Empty;
+        var startedAt = DateTimeOffset.Now;
         IsRunning = true;
         try
         {
@@ -370,6 +372,43 @@
         {
             IsRunning = false;
             SavePageState();
+            // Persist the attempt independently of the optional human-readable report.
+            // A history-write failure must never turn a successful XML conversion into a failure.
+            try
+            {
+                var completedAt = DateTimeOffset.Now;
+                var hasResult = SingleResult is not null || BatchResult is not null;
+
+                var status = !string.IsNullOrWhiteSpace(ErrorMessage)
+                    ? "Failed"
+                    : hasResult ? "Completed" : "NoResult";
+
+                var summary = SingleResult is not null
+                    ? $"{SingleResult.RowCount} rows; {SingleResult.FilmCount} films"
+                    : BatchResult is not null
+                        ? $"{BatchResult.Departments.Count} departments processed"
+                        : null;
+
+                await ConversionHistory.SaveAsync(new ConversionHistoryEntry(
+                    Guid.NewGuid(),
+                    startedAt,
+                    completedAt,
+                    Mode,
+                    status,
+                    string.IsNullOrWhiteSpace(NamesPath) ? null : NamesPath,
+                    string.IsNullOrWhiteSpace(FieldsCsvPath) ? null : FieldsCsvPath,
+                    string.IsNullOrWhiteSpace(DataCsvPath) ? null : DataCsvPath,
+                    string.IsNullOrWhiteSpace(InputFolder) ? null : InputFolder,
+                    string.IsNullOrWhiteSpace(OutputFolder) ? null : OutputFolder,
+                    string.IsNullOrWhiteSpace(ReportPath) ? null : ReportPath,
+                    summary,
+                    string.IsNullOrWhiteSpace(ErrorMessage) ? null : ErrorMessage));
+            }
+            catch (Exception historyException)
+            {
+                System.Diagnostics.Debug.WriteLine(
+                    $"Could not save conversion history: {historyException}");
+            }
             _scrollResultsIntoView = SingleResult is not null || BatchResult is not null;
         }
     }

@@ -62,13 +62,16 @@ public sealed class CsvProjectConverter
             var issues = new List<RowValidationIssue>();
             void Add(string code, string message, string? column) => issues.Add(new RowValidationIssue(code, message, column));
 
-            if (rowValues.Count != expected.Length)
+            // Check the physical row width before mapping it to the expected field-definition order.
+            // MapDataRow always returns expected.Length values, so checking its result would hide
+            // extra or missing cells and prevent the conflict/repair workflow from seeing them.
+            if (!settings.LegacyTolerantMode && normalized.Count != expected.Length)
             {
-                var column = rowValues.Count > expected.Length
+                var column = normalized.Count > expected.Length
                     ? $"#{expected.Length + 1} (unexpected extra column)"
-                    : expected[rowValues.Count];
+                    : expected[normalized.Count];
                 Add("COLUMN_COUNT",
-                    $"Row has {rowValues.Count} columns; expected {expected.Length}.", column);
+                    $"Row has {normalized.Count} columns; expected {expected.Length}.", column);
             }
             else
             {
@@ -313,6 +316,10 @@ public sealed class CsvProjectConverter
         {
             var row = enumerator.Current;
             var normalized = NormalizeDataRow(row, header.Values, settings, csvPath, autoFixes);
+            // In strict mode, preserve the original row-width guard. This also ensures Convert()
+            // cannot silently write a row that preflight would classify as structurally damaged.
+            if (!settings.LegacyTolerantMode && normalized.Count != expected.Length)
+                ValidateColumnCount(new CsvRecord(normalized, row.StartLine), expected.Length, csvPath, expected);
             var values = MapDataRow(normalized, expected, headerMap);
             var filmIdRaw = values[1];
             var filmTypeRaw = values[2];
